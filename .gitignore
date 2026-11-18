@@ -1,3 +1,7 @@
+# Local render used while checking the office. Not part of the game.
+office_preview.png
+office_preview.png.import
+
 # Godot 4 editor cache and imported binaries.
 # Sidecar *.import files and *.gd.uid files stay tracked.
 .godot/

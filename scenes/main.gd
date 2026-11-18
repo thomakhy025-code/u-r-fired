@@ -6,7 +6,7 @@ const RAIL := 250.0
 
 var state: GameState
 var header: Label
-var desk_buttons: Array = []
+var office_view: OfficeView
 var panel: VBoxContainer
 var mail_button: Button
 var bank_button: Button
@@ -51,30 +51,10 @@ func _build() -> void:
 	header.add_theme_font_size_override("font_size", 20)
 	office_box.add_child(header)
 
-	var room := ColorRect.new()
-	room.custom_minimum_size = Vector2(0, 92)
-	room.color = Color("3c3428")
-	office_box.add_child(room)
-	var room_label := Label.new()
-	room_label.text = "Director\nOne room. You do not walk. You press the buttons."
-	room_label.position = Vector2(16, 18)
-	room_label.add_theme_font_size_override("font_size", 18)
-	room.add_child(room_label)
-
-	var desks := HBoxContainer.new()
-	desks.add_theme_constant_override("separation", 10)
-	office_box.add_child(desks)
-	for seat in GameState.SEAT_COUNT:
-		var button := Button.new()
-		button.custom_minimum_size = Vector2(180, 108)
-		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		var seat_index: int = seat
-		button.pressed.connect(func() -> void:
-			_press_seat(seat_index)
-		)
-		desks.add_child(button)
-		desk_buttons.append(button)
+	office_view = OfficeView.new()
+	office_view.seat_pressed.connect(_press_seat)
+	office_box.add_child(office_view)
+	office_view.bind_game(state)
 
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -127,6 +107,11 @@ func _rail_button(rail: VBoxContainer, text: String, action: Callable) -> Button
 
 
 func _press_seat(seat: int) -> void:
+	if seat < 0:
+		status = "The director stays in the private room. The company moves when you press the signs."
+		view = "home"
+		_show_view()
+		return
 	for hired in state.hired_people():
 		if hired.seat == seat:
 			view = "person:" + hired.id
@@ -142,17 +127,7 @@ func _show_view() -> void:
 		header.text += "\n" + state.loss_reason
 	elif state.season_held:
 		header.text += "\nThe season holds."
-	for seat in desk_buttons.size():
-		var button: Button = desk_buttons[seat]
-		var sitting := false
-		for hired in state.hired_people():
-			if hired.seat != seat:
-				continue
-			var status := "Training" if hired.training else "At the desk"
-			button.text = "%s\n%s  love %d\n%s\n%s" % [hired.display_name, state.hearts(hired.love), hired.love, hired.balance, status]
-			sitting = true
-		if not sitting:
-			button.text = "Empty desk"
+	office_view.sync_staff()
 	mail_button.text = "Mail  %d" % state.unread_count()
 	bank_button.text = "Bank  %s" % state.rate_text()
 	end_button.disabled = state.lost
