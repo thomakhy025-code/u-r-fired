@@ -1,0 +1,47 @@
+# Godot 4 editor cache and imported binaries.
+# Sidecar *.import files and *.gd.uid files stay tracked.
+.godot/
+
+# Godot 3 import folder. This does not ignore *.import files.
+.import/
+
+# Generated translation binaries. Source CSV/PO files stay tracked.
+*.translation
+
+# Export caches and build output. export_presets.cfg stays tracked.
+export.cfg
+/build/
+/exports/
+*.tmp
+
+# Local result from the project hook. Not a source file.
+.cursor/hooks/last-sync-result.txt
+
+# Secrets
+.env
+.env.*
+credentials.json
+credentials*.json
+*.pem
+*.key
+*.pfx
+*.p12
+id_rsa
+id_rsa.*
+id_dsa
+id_dsa.*
+id_ecdsa
+id_ecdsa.*
+id_ed25519
+id_ed25519.*
+
+# .NET Godot leftovers
+.mono/
+mono_crash.*.json
+
+# OS and editor junk
+.DS_Store
+Thumbs.db
+*~
+*.blend1
+.idea/
