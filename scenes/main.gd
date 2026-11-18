@@ -23,8 +23,9 @@ func _ready() -> void:
 
 
 func _build() -> void:
+	theme = _warm_theme()
 	var backdrop := ColorRect.new()
-	backdrop.color = Color("1b212c")
+	backdrop.color = Color("3c2a22")
 	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
 	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(backdrop)
@@ -49,6 +50,7 @@ func _build() -> void:
 	header = Label.new()
 	header.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	header.add_theme_font_size_override("font_size", 20)
+	header.add_theme_color_override("font_color", Color("f3e2cc"))
 	office_box.add_child(header)
 
 	office_view = OfficeView.new()
@@ -77,7 +79,7 @@ func _build() -> void:
 	rail_margin.add_theme_constant_override("margin_left", 8)
 	rail_margin.add_child(rail)
 	columns.add_child(rail_margin)
-	rail_bg.color = Color("12171f")
+	rail_bg.color = Color("4a3328")
 	rail_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	rail_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	rail_margin.add_child(rail_bg)
@@ -94,7 +96,47 @@ func _build() -> void:
 		view = "mail"
 		_show_view()
 	)
-	end_button.add_theme_color_override("font_color", Color("f2d48a"))
+	end_button.add_theme_color_override("font_color", Color("3a2418"))
+
+
+func _warm_theme() -> Theme:
+	var warm := Theme.new()
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = Color("c47a3a")
+	normal.corner_radius_top_left = 12
+	normal.corner_radius_top_right = 12
+	normal.corner_radius_bottom_left = 12
+	normal.corner_radius_bottom_right = 12
+	normal.content_margin_left = 14
+	normal.content_margin_right = 14
+	normal.content_margin_top = 8
+	normal.content_margin_bottom = 8
+	var hover := normal.duplicate() as StyleBoxFlat
+	hover.bg_color = Color("d8924a")
+	var pressed := normal.duplicate() as StyleBoxFlat
+	pressed.bg_color = Color("a8642c")
+	warm.set_stylebox("normal", "Button", normal)
+	warm.set_stylebox("hover", "Button", hover)
+	warm.set_stylebox("pressed", "Button", pressed)
+	warm.set_stylebox("focus", "Button", hover)
+	warm.set_color("font_color", "Button", Color("3a2418"))
+	warm.set_color("font_hover_color", "Button", Color("2c1a10"))
+	warm.set_color("font_pressed_color", "Button", Color("2c1a10"))
+	warm.set_color("font_color", "Label", Color("f6e6d4"))
+	warm.set_color("font_color", "SpinBox", Color("3a2418"))
+	warm.set_color("font_color", "LineEdit", Color("3a2418"))
+	var field := StyleBoxFlat.new()
+	field.bg_color = Color("f3e2cc")
+	field.corner_radius_top_left = 8
+	field.corner_radius_top_right = 8
+	field.corner_radius_bottom_left = 8
+	field.corner_radius_bottom_right = 8
+	field.content_margin_left = 8
+	field.content_margin_right = 8
+	warm.set_stylebox("normal", "LineEdit", field)
+	warm.set_font_size("font_size", "Button", 18)
+	warm.set_font_size("font_size", "Label", 16)
+	return warm
 
 
 func _rail_button(rail: VBoxContainer, text: String, action: Callable) -> Button:

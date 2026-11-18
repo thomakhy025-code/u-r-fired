@@ -12,12 +12,24 @@ const STAFF := {
 	"ben": {"shirt": Color("c4495a"), "hair": Color("2c2622"), "skin": Color("e8b898")},
 }
 
+const TOY_LIGHT := """
+void light() {
+	float facing = dot(NORMAL, LIGHT);
+	float band = step(0.22, facing);
+	float shade = mix(0.62, 0.9, band);
+	DIFFUSE_LIGHT += ALBEDO * LIGHT_COLOR * ATTENUATION * shade;
+}
+"""
+
 var viewport: SubViewport
 var camera: Camera3D
 var game: GameState
 var workers := {}
 var director: Node3D
 var clock := 0.0
+var _toy: Shader
+var _wood_shader: Shader
+var _fade: Shader
 
 
 func _ready() -> void:
@@ -126,53 +138,65 @@ func _build_world() -> void:
 	var env := WorldEnvironment.new()
 	var world := Environment.new()
 	world.background_mode = Environment.BG_COLOR
-	world.background_color = Color("d7eef8")
+	world.background_color = Color("7eabbf")
 	world.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	world.ambient_light_color = Color("fff6ea")
-	world.ambient_light_energy = 0.85
+	world.ambient_light_color = Color("e7d3b8")
+	world.ambient_light_energy = 0.22
+	world.tonemap_mode = Environment.TONE_MAPPER_ACES
+	world.tonemap_exposure = 0.86
+	world.adjustment_enabled = true
+	world.adjustment_brightness = 0.96
+	world.adjustment_contrast = 1.08
+	world.adjustment_saturation = 1.2
 	env.environment = world
 	root.add_child(env)
 	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-48, 38, 0)
-	sun.light_color = Color("fff4dd")
-	sun.light_energy = 1.15
+	sun.rotation_degrees = Vector3(-52, 32, 0)
+	sun.light_color = Color("ffe0b8")
+	sun.light_energy = 0.85
 	sun.shadow_enabled = true
+	sun.shadow_opacity = 0.55
 	root.add_child(sun)
 	camera = Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera.size = 9.2
-	camera.look_at_from_position(Vector3(9.5, 8.2, 9.5), Vector3(0.2, 0.4, 0.0))
+	camera.size = 7.6
+	camera.look_at_from_position(Vector3(9.2, 5.6, 9.2), Vector3(-0.2, 0.7, -0.1))
 	root.add_child(camera)
 
-	_box(root, Vector3(0, -0.08, 0), Vector3(13.5, 0.16, 9.2), _wood())
-	_box(root, Vector3(0, 0.01, -1.1), Vector3(7.4, 0.04, 4.6), _paint(Color("f6c7a1")))
-	_box(root, Vector3(0, 1.35, -4.55), Vector3(13.5, 2.7, 0.18), _paint(Color("f7f1e8")))
-	_box(root, Vector3(-6.65, 1.35, 0), Vector3(0.18, 2.7, 9.2), _paint(Color("f4ebe3")))
-	_box(root, Vector3(2.2, 1.7, -4.42), Vector3(3.2, 1.5, 0.08), _paint(Color("9fd4ee")))
-	_box(root, Vector3(2.2, 2.55, -4.42), Vector3(3.4, 0.12, 0.12), _paint(Color("f4f7fb")))
-	_box(root, Vector3(2.2, 0.95, -4.42), Vector3(3.4, 0.12, 0.12), _paint(Color("f4f7fb")))
-	_plant(root, Vector3(5.6, 0, 3.3))
-	_plant(root, Vector3(-5.5, 0, 3.4))
-	_plant(root, Vector3(5.7, 0, -3.2))
-	_shelf(root, Vector3(-5.6, 0, -3.6))
-	_lamp(root, Vector3(-1.2, 2.35, 0.4))
-	_lamp(root, Vector3(2.6, 2.35, 0.4))
+	_box(root, Vector3(0, -0.08, 0), Vector3(13.2, 0.16, 9.0), _wood())
+	_box(root, Vector3(-0.35, 0.02, 0.35), Vector3(2.2, 0.025, 1.5), _paint(Color("b85a48")))
+	_box(root, Vector3(0, 1.25, -4.48), Vector3(13.2, 2.5, 0.18), _paint(Color("d7b07a")))
+	_box(root, Vector3(0, 0.42, -4.36), Vector3(13.2, 0.84, 0.08), _paint(Color("d09a62")))
+	_box(root, Vector3(-6.5, 1.25, 0), Vector3(0.18, 2.5, 9.0), _paint(Color("d7b07a")))
+	_box(root, Vector3(-6.38, 0.42, 0), Vector3(0.08, 0.84, 9.0), _paint(Color("c98b52")))
+	_box(root, Vector3(2.15, 1.55, -4.34), Vector3(2.7, 1.25, 0.06), _paint(Color("6eafc8")))
+	_box(root, Vector3(2.15, 2.22, -4.32), Vector3(2.95, 0.1, 0.1), _paint(Color("a56b3c")))
+	_box(root, Vector3(2.15, 0.88, -4.32), Vector3(2.95, 0.1, 0.1), _paint(Color("a56b3c")))
+	_box(root, Vector3(0.85, 1.55, -4.32), Vector3(0.08, 1.35, 0.1), _paint(Color("a56b3c")))
+	_box(root, Vector3(3.45, 1.55, -4.32), Vector3(0.08, 1.35, 0.1), _paint(Color("a56b3c")))
+	_plant(root, Vector3(5.15, 0, 2.85))
+	_plant(root, Vector3(-5.35, 0, 2.9))
+	_plant(root, Vector3(5.2, 0, -2.7))
+	_shelf(root, Vector3(-5.45, 0, -3.15))
+	_lamp(root, Vector3(-0.4, 2.15, 0.2))
+	_lamp(root, Vector3(2.8, 2.15, 0.2))
 
 	var director_seat := Vector3(-4.15, 0, -2.7)
 	_glass_room(root, director_seat)
-	_place_worker(root, director_seat)
+	_place_worker(root, director_seat, Color("d9b48a"))
 	director = _worker(root, Color("2f3544"), Color("3a2a22"), Color("f1c7a3"), "Director")
 	director.position = director_seat
 
 	var spots := [
-		Vector3(-2.15, 0, 0.85),
-		Vector3(1.55, 0, 0.85),
-		Vector3(-2.15, 0, -1.15),
-		Vector3(1.55, 0, -1.15),
+		Vector3(-2.55, 0, 1.25),
+		Vector3(1.85, 0, 1.25),
+		Vector3(-2.55, 0, -1.45),
+		Vector3(1.85, 0, -1.45),
 	]
+	var mats := [Color("6fbfa3"), Color("e2a84a"), Color("7aa6d4"), Color("e07a62")]
 	var ids := ["mina", "june", "otto", "ben"]
 	for i in spots.size():
-		_place_worker(root, spots[i])
+		_place_worker(root, spots[i], mats[i])
 		var look: Dictionary = STAFF[ids[i]]
 		var person := _worker(root, look["shirt"] as Color, look["hair"] as Color, look["skin"] as Color, "")
 		person.position = spots[i]
@@ -188,52 +212,53 @@ func _show_worker(id: String, person: GameState.Person) -> void:
 	label.text = "%s\n%s" % [person.display_name, game.hearts(person.love)]
 
 
-func _place_worker(parent: Node3D, seat: Vector3) -> void:
+func _place_worker(parent: Node3D, seat: Vector3, mat: Color) -> void:
+	_shadow(parent, seat + Vector3(0, 0, 0.35), Vector2(1.35, 1.15))
 	_chair(parent, seat)
-	_workstation(parent, seat + Vector3(0, 0, 0.72))
+	_workstation(parent, seat + Vector3(0, 0, 0.78), mat)
+
+
+func _shadow(parent: Node3D, at: Vector3, extents: Vector2) -> void:
+	_box(parent, at + Vector3(0, 0.02, 0), Vector3(extents.x, 0.015, extents.y), _glass(Color(0.28, 0.16, 0.08, 0.35)))
 
 
 func _chair(parent: Node3D, at: Vector3) -> void:
-	_box(parent, at + Vector3(0, 0.32, -0.02), Vector3(0.46, 0.08, 0.46), _paint(Color("e7d3b4")))
-	_box(parent, at + Vector3(0, 0.58, -0.22), Vector3(0.46, 0.42, 0.08), _paint(Color("efe2cf")))
-	for x in [-0.18, 0.18]:
-		_box(parent, at + Vector3(x, 0.16, 0.16), Vector3(0.06, 0.32, 0.06), _paint(Color("c9a077")))
-		_box(parent, at + Vector3(x, 0.16, -0.16), Vector3(0.06, 0.32, 0.06), _paint(Color("c9a077")))
+	_box(parent, at + Vector3(0, 0.34, -0.02), Vector3(0.5, 0.09, 0.48), _paint(Color("c9844e")))
+	_box(parent, at + Vector3(0, 0.62, -0.24), Vector3(0.5, 0.46, 0.09), _paint(Color("b8733e")))
+	for x in [-0.19, 0.19]:
+		_box(parent, at + Vector3(x, 0.16, 0.16), Vector3(0.07, 0.32, 0.07), _paint(Color("8a542c")))
+		_box(parent, at + Vector3(x, 0.16, -0.16), Vector3(0.07, 0.32, 0.07), _paint(Color("8a542c")))
 
 
-func _workstation(parent: Node3D, at: Vector3) -> void:
+func _workstation(parent: Node3D, at: Vector3, mat: Color) -> void:
 	var desk := Node3D.new()
 	desk.position = at
 	parent.add_child(desk)
-	_box(desk, Vector3(0, 0.74, 0), Vector3(1.28, 0.08, 0.68), _paint(Color("fffaf4")))
-	for x in [-0.52, 0.52]:
-		for z in [-0.24, 0.24]:
-			_box(desk, Vector3(x, 0.36, z), Vector3(0.07, 0.72, 0.07), _paint(Color("d8b48a")))
-	var screen := _box(desk, Vector3(0, 0.94, -0.24), Vector3(0.48, 0.26, 0.04), _paint(Color("243246")))
-	var glow: StandardMaterial3D = screen.material_override
-	glow.emission_enabled = true
-	glow.emission = Color("8fd6ff")
-	glow.emission_energy_multiplier = 0.35
-	_box(desk, Vector3(0, 0.82, -0.24), Vector3(0.08, 0.12, 0.05), _paint(Color("d9c3a6")))
-	_box(desk, Vector3(0, 0.79, 0.08), Vector3(0.28, 0.02, 0.12), _paint(Color("d7dde6")))
-	_box(desk, Vector3(0.36, 0.79, 0.02), Vector3(0.16, 0.02, 0.2), _paint(Color("f7fbfc")))
-	_box(desk, Vector3(-0.38, 0.8, 0.04), Vector3(0.14, 0.035, 0.18), _paint(Color("f2d7b5")))
+	_box(desk, Vector3(0, 0.7, 0), Vector3(1.34, 0.1, 0.72), _paint(Color("e6c48a")))
+	_box(desk, Vector3(0, 0.76, 0.02), Vector3(0.72, 0.025, 0.4), _paint(mat))
+	for x in [-0.54, 0.54]:
+		for z in [-0.26, 0.26]:
+			_box(desk, Vector3(x, 0.34, z), Vector3(0.08, 0.68, 0.08), _paint(Color("8d5a32")))
+	_box(desk, Vector3(0, 0.98, -0.22), Vector3(0.58, 0.36, 0.05), _paint(Color("24384a")))
+	_box(desk, Vector3(0, 0.99, -0.19), Vector3(0.48, 0.26, 0.02), _paint(Color("3f8eb0")))
+	_box(desk, Vector3(0, 0.8, -0.22), Vector3(0.08, 0.14, 0.05), _paint(Color("8d5a32")))
+	_box(desk, Vector3(0, 0.77, 0.1), Vector3(0.32, 0.025, 0.14), _paint(Color("5d6b78")))
+	_box(desk, Vector3(0.38, 0.77, 0.02), Vector3(0.18, 0.02, 0.22), _paint(Color("f4efe4")))
+	_box(desk, Vector3(-0.4, 0.78, 0.04), Vector3(0.16, 0.04, 0.18), _paint(Color("e7c9a0")))
 	var mug := MeshInstance3D.new()
 	var cup := CylinderMesh.new()
-	cup.top_radius = 0.05
-	cup.bottom_radius = 0.045
-	cup.height = 0.09
+	cup.top_radius = 0.055
+	cup.bottom_radius = 0.048
+	cup.height = 0.1
 	mug.mesh = cup
-	mug.position = Vector3(0.46, 0.84, 0.16)
-	mug.material_override = _paint(Color("f4f7fb"))
+	mug.position = Vector3(0.48, 0.82, 0.16)
+	mug.material_override = _paint(Color("f2efe6"))
 	desk.add_child(mug)
 
 
 func _glass_room(parent: Node3D, at: Vector3) -> void:
-	var glass := _paint(Color("d5f3ef"))
-	glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	glass.albedo_color = Color(0.78, 0.94, 0.92, 0.28)
-	var trim := _paint(Color("f7f1e8"))
+	var glass := _glass(Color(0.55, 0.78, 0.74, 0.45))
+	var trim := _paint(Color("a56b3c"))
 	_box(parent, at + Vector3(0, 0.42, -0.85), Vector3(2.5, 0.84, 0.06), glass)
 	_box(parent, at + Vector3(-1.22, 0.42, 0.15), Vector3(0.06, 0.84, 1.35), glass)
 	_box(parent, at + Vector3(1.22, 0.42, 0.15), Vector3(0.06, 0.84, 1.35), glass)
@@ -247,48 +272,48 @@ func _worker(parent: Node3D, shirt: Color, hair: Color, skin: Color, title: Stri
 	parent.add_child(person)
 	var body := MeshInstance3D.new()
 	var capsule := CapsuleMesh.new()
-	capsule.radius = 0.18
-	capsule.height = 0.4
+	capsule.radius = 0.22
+	capsule.height = 0.46
 	body.mesh = capsule
-	body.position = Vector3(0, 0.52, 0)
+	body.position = Vector3(0, 0.58, 0)
 	body.material_override = _paint(shirt)
 	person.add_child(body)
 	var head := MeshInstance3D.new()
 	var sphere := SphereMesh.new()
-	sphere.radius = 0.23
-	sphere.height = 0.46
+	sphere.radius = 0.28
+	sphere.height = 0.56
 	head.mesh = sphere
-	head.position = Vector3(0, 0.86, 0)
+	head.position = Vector3(0, 0.98, 0)
 	head.material_override = _paint(skin)
 	person.add_child(head)
 	var hair_mesh := MeshInstance3D.new()
 	var hair_sphere := SphereMesh.new()
-	hair_sphere.radius = 0.24
-	hair_sphere.height = 0.3
+	hair_sphere.radius = 0.26
+	hair_sphere.height = 0.28
 	hair_mesh.mesh = hair_sphere
-	hair_mesh.position = Vector3(0, 0.98, -0.03)
+	hair_mesh.position = Vector3(0, 1.16, -0.14)
 	hair_mesh.material_override = _paint(hair)
 	person.add_child(hair_mesh)
 	for side in [-1.0, 1.0]:
 		var eye := MeshInstance3D.new()
 		var dot := SphereMesh.new()
-		dot.radius = 0.028
-		dot.height = 0.056
+		dot.radius = 0.035
+		dot.height = 0.07
 		eye.mesh = dot
-		eye.position = Vector3(0.08 * side, 0.88, 0.19)
+		eye.position = Vector3(0.09 * side, 1.0, 0.23)
 		eye.material_override = _paint(Color("2b241c"))
 		person.add_child(eye)
 	var arms := Node3D.new()
 	arms.name = "Arms"
-	arms.position = Vector3(0, 0.62, 0.1)
+	arms.position = Vector3(0, 0.68, 0.12)
 	person.add_child(arms)
 	for side in [-1.0, 1.0]:
 		var arm := MeshInstance3D.new()
 		var limb := CapsuleMesh.new()
-		limb.radius = 0.05
-		limb.height = 0.28
+		limb.radius = 0.06
+		limb.height = 0.32
 		arm.mesh = limb
-		arm.position = Vector3(0.24 * side, -0.08, 0.08)
+		arm.position = Vector3(0.28 * side, -0.08, 0.1)
 		arm.rotation_degrees.x = 70
 		arm.material_override = _paint(shirt)
 		arms.add_child(arm)
@@ -297,14 +322,14 @@ func _worker(parent: Node3D, shirt: Color, hair: Color, skin: Color, title: Stri
 	var pages := BoxMesh.new()
 	pages.size = Vector3(0.22, 0.05, 0.16)
 	book.mesh = pages
-	book.position = Vector3(0, 0.7, 0.3)
+	book.position = Vector3(0, 0.78, 0.34)
 	book.material_override = _paint(Color("f4efe4"))
 	book.visible = false
 	person.add_child(book)
 	var label := Label3D.new()
 	label.name = "Name"
 	label.text = title
-	label.position = Vector3(0, 1.28, 0)
+	label.position = Vector3(0, 1.48, 0)
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.font_size = 42
 	label.pixel_size = 0.0045
@@ -317,30 +342,27 @@ func _worker(parent: Node3D, shirt: Color, hair: Color, skin: Color, title: Stri
 
 
 func _plant(parent: Node3D, at: Vector3) -> void:
-	_box(parent, at + Vector3(0, 0.16, 0), Vector3(0.28, 0.32, 0.28), _paint(Color("e07a4c")))
+	_box(parent, at + Vector3(0, 0.18, 0), Vector3(0.34, 0.36, 0.34), _paint(Color("c4512f")))
 	var puff := MeshInstance3D.new()
 	var ball := SphereMesh.new()
-	ball.radius = 0.28
-	ball.height = 0.56
+	ball.radius = 0.36
+	ball.height = 0.72
 	puff.mesh = ball
-	puff.position = at + Vector3(0, 0.52, 0)
-	puff.material_override = _paint(Color("67b96a"))
+	puff.position = at + Vector3(0, 0.62, 0)
+	puff.material_override = _paint(Color("2f8f45"))
 	parent.add_child(puff)
 
 
 func _shelf(parent: Node3D, at: Vector3) -> void:
-	_box(parent, at + Vector3(0, 0.7, 0), Vector3(1.1, 1.4, 0.28), _paint(Color("e6c89a")))
-	_box(parent, at + Vector3(-0.22, 0.95, 0.08), Vector3(0.16, 0.42, 0.12), _paint(Color("d4574e")))
-	_box(parent, at + Vector3(0.05, 0.95, 0.08), Vector3(0.16, 0.42, 0.12), _paint(Color("3d8f86")))
-	_box(parent, at + Vector3(0.3, 0.88, 0.08), Vector3(0.14, 0.28, 0.12), _paint(Color("e0b15a")))
+	_box(parent, at + Vector3(0, 0.75, 0), Vector3(1.15, 1.5, 0.3), _paint(Color("a86b3c")))
+	_box(parent, at + Vector3(-0.24, 1.0, 0.1), Vector3(0.16, 0.46, 0.12), _paint(Color("c4494a")))
+	_box(parent, at + Vector3(0.02, 1.0, 0.1), Vector3(0.16, 0.46, 0.12), _paint(Color("2f8a78")))
+	_box(parent, at + Vector3(0.28, 0.92, 0.1), Vector3(0.14, 0.3, 0.12), _paint(Color("e0a04a")))
 
 
 func _lamp(parent: Node3D, at: Vector3) -> void:
-	var shade := _paint(Color("ffe7a3"))
-	shade.emission_enabled = true
-	shade.emission = Color("ffd98a")
-	shade.emission_energy_multiplier = 0.25
-	_box(parent, at, Vector3(0.42, 0.06, 0.42), shade)
+	_box(parent, at, Vector3(0.08, 0.7, 0.08), _paint(Color("8a542c")))
+	_box(parent, at + Vector3(0, -0.28, 0), Vector3(0.55, 0.08, 0.55), _paint(Color("e2a84a")))
 
 
 func _box(parent: Node3D, at: Vector3, extents: Vector3, material: Material) -> MeshInstance3D:
@@ -354,18 +376,35 @@ func _box(parent: Node3D, at: Vector3, extents: Vector3, material: Material) -> 
 	return mesh_instance
 
 
-func _paint(color: Color) -> StandardMaterial3D:
-	var material := StandardMaterial3D.new()
-	material.albedo_color = color
-	material.roughness = 0.72
-	material.diffuse_mode = BaseMaterial3D.DIFFUSE_TOON
-	material.specular_mode = BaseMaterial3D.SPECULAR_TOON
+func _paint(color: Color) -> ShaderMaterial:
+	var material := ShaderMaterial.new()
+	material.shader = _shared_toy()
+	material.set_shader_parameter("albedo", color)
 	return material
 
 
-func _wood() -> ShaderMaterial:
-	var shader := Shader.new()
-	shader.code = "shader_type spatial; render_mode diffuse_toon, specular_toon; void fragment() { vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; float band = fract(world.x * 0.85); float seam = step(0.06, band); float end_grain = step(0.94, fract(world.z * 0.45)); vec3 plank = mix(vec3(0.62, 0.42, 0.24), vec3(0.84, 0.64, 0.40), seam); ALBEDO = mix(plank * 0.78, plank, end_grain); }"
+func _glass(color: Color) -> ShaderMaterial:
+	if _fade == null:
+		_fade = Shader.new()
+		_fade.code = "shader_type spatial; render_mode blend_mix, depth_draw_opaque, cull_back, specular_disabled; uniform vec4 albedo : source_color = vec4(1.0); void fragment() { ALBEDO = albedo.rgb; ALPHA = albedo.a; }\n" + TOY_LIGHT
 	var material := ShaderMaterial.new()
-	material.shader = shader
+	material.shader = _fade
+	material.set_shader_parameter("albedo", color)
+	return material
+
+
+func _shared_toy() -> Shader:
+	if _toy != null:
+		return _toy
+	_toy = Shader.new()
+	_toy.code = "shader_type spatial; render_mode cull_back, specular_disabled; uniform vec4 albedo : source_color = vec4(1.0); void fragment() { ALBEDO = albedo.rgb; }\n" + TOY_LIGHT
+	return _toy
+
+
+func _wood() -> ShaderMaterial:
+	if _wood_shader == null:
+		_wood_shader = Shader.new()
+		_wood_shader.code = "shader_type spatial; render_mode specular_disabled; void fragment() { vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; float band = fract(world.x * 0.72); float seam = step(0.055, band); float grain = step(0.88, fract(world.z * 0.5)); vec3 plank = mix(vec3(0.48, 0.26, 0.1), vec3(0.66, 0.38, 0.16), seam); ALBEDO = mix(plank, plank * 0.8, grain); }\n" + TOY_LIGHT
+	var material := ShaderMaterial.new()
+	material.shader = _wood_shader
 	return material
