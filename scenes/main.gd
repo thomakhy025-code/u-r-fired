@@ -1,8 +1,16 @@
 extends Control
 
-## The player has no avatar. The office is the view. The right edge is buttons.
+## The player has no avatar. Signs sit on a shelf inside the office.
 
-const RAIL := 250.0
+const INK := Color("3a2c24")
+const CREAM := Color("f3eadc")
+const PAPER := Color("e7d7c3")
+const SAGE := Color("5f7d68")
+const CLAY := Color("a86b52")
+const SEA := Color("5d7380")
+const PLUM := Color("6e5d78")
+const GOLD := Color("8c7344")
+const MOSS := Color("4d6654")
 
 var state: GameState
 var header: Label
@@ -24,79 +32,63 @@ func _ready() -> void:
 
 func _build() -> void:
 	theme = _warm_theme()
-	var backdrop := ColorRect.new()
-	backdrop.color = Color("3c2a22")
-	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
-	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(backdrop)
+	office_view = OfficeView.new()
+	office_view.set_anchors_preset(Control.PRESET_FULL_RECT)
+	office_view.seat_pressed.connect(_press_seat)
+	add_child(office_view)
+	office_view.bind_game(state)
 
-	var columns := HBoxContainer.new()
-	columns.set_anchors_preset(Control.PRESET_FULL_RECT)
-	columns.add_theme_constant_override("separation", 0)
-	add_child(columns)
-
-	var office := MarginContainer.new()
-	office.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	office.add_theme_constant_override("margin_left", 20)
-	office.add_theme_constant_override("margin_top", 16)
-	office.add_theme_constant_override("margin_right", 12)
-	office.add_theme_constant_override("margin_bottom", 16)
-	columns.add_child(office)
-
-	var office_box := VBoxContainer.new()
-	office_box.add_theme_constant_override("separation", 12)
-	office.add_child(office_box)
+	var hud := Control.new()
+	hud.set_anchors_preset(Control.PRESET_FULL_RECT)
+	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(hud)
 
 	header = Label.new()
-	header.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	header.position = Vector2(28, 18)
 	header.add_theme_font_size_override("font_size", 20)
-	header.add_theme_color_override("font_color", Color("f3e2cc"))
-	office_box.add_child(header)
+	header.add_theme_color_override("font_color", CREAM)
+	hud.add_child(header)
 
-	office_view = OfficeView.new()
-	office_view.seat_pressed.connect(_press_seat)
-	office_box.add_child(office_view)
-	office_view.bind_game(state)
+	var blotter := PanelContainer.new()
+	blotter.set_anchors_preset(Control.PRESET_FULL_RECT)
+	blotter.offset_left = 28
+	blotter.offset_top = 360
+	blotter.offset_right = -28
+	blotter.offset_bottom = -92
+	blotter.mouse_filter = Control.MOUSE_FILTER_STOP
+	blotter.add_theme_stylebox_override("panel", _paper_box(Color("c4b09a")))
+	hud.add_child(blotter)
 
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	office_box.add_child(scroll)
+	blotter.add_child(scroll)
 	panel = VBoxContainer.new()
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	panel.add_theme_constant_override("separation", 8)
 	scroll.add_child(panel)
 
-	var rail_bg := ColorRect.new()
-	# The rail is a column of buttons, not a second scene.
-	var rail := VBoxContainer.new()
-	rail.custom_minimum_size = Vector2(RAIL, 0)
-	rail.add_theme_constant_override("separation", 8)
-	var rail_margin := MarginContainer.new()
-	rail_margin.add_theme_constant_override("margin_top", 16)
-	rail_margin.add_theme_constant_override("margin_right", 16)
-	rail_margin.add_theme_constant_override("margin_bottom", 16)
-	rail_margin.add_theme_constant_override("margin_left", 8)
-	rail_margin.add_child(rail)
-	columns.add_child(rail_margin)
-	rail_bg.color = Color("4a3328")
-	rail_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	rail_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	rail_margin.add_child(rail_bg)
-	rail_margin.move_child(rail_bg, 0)
+	var shelf := HBoxContainer.new()
+	shelf.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	shelf.offset_left = 20
+	shelf.offset_top = -80
+	shelf.offset_right = -20
+	shelf.offset_bottom = -16
+	shelf.add_theme_constant_override("separation", 8)
+	shelf.mouse_filter = Control.MOUSE_FILTER_STOP
+	hud.add_child(shelf)
 
-	mail_button = _rail_button(rail, "Mail", func() -> void: view = "mail"; _show_view())
-	_rail_button(rail, "Newspaper", func() -> void: view = "paper"; _show_view())
-	_rail_button(rail, "Orders", func() -> void: view = "orders"; _show_view())
-	_rail_button(rail, "Suppliers", func() -> void: view = "suppliers"; _show_view())
-	_rail_button(rail, "Recruit", func() -> void: view = "recruit"; _show_view())
-	bank_button = _rail_button(rail, "Bank", func() -> void: view = "bank"; _show_view())
-	end_button = _rail_button(rail, "End week", func() -> void:
+	mail_button = _sign(shelf, "Mail", SAGE, func() -> void: view = "mail"; _show_view())
+	_sign(shelf, "Paper", Color("8a7356"), func() -> void: view = "paper"; _show_view())
+	_sign(shelf, "Orders", CLAY, func() -> void: view = "orders"; _show_view())
+	_sign(shelf, "Suppliers", SEA, func() -> void: view = "suppliers"; _show_view())
+	_sign(shelf, "Recruit", PLUM, func() -> void: view = "recruit"; _show_view())
+	bank_button = _sign(shelf, "Bank", GOLD, func() -> void: view = "bank"; _show_view())
+	end_button = _sign(shelf, "End week", MOSS, func() -> void:
 		status = state.end_week()
 		view = "mail"
 		_show_view()
 	)
-	end_button.add_theme_color_override("font_color", Color("3a2418"))
 
 
 func _warm_theme() -> Theme:
@@ -122,7 +114,7 @@ func _warm_theme() -> Theme:
 	warm.set_color("font_color", "Button", Color("3a2418"))
 	warm.set_color("font_hover_color", "Button", Color("2c1a10"))
 	warm.set_color("font_pressed_color", "Button", Color("2c1a10"))
-	warm.set_color("font_color", "Label", Color("f6e6d4"))
+	warm.set_color("font_color", "Label", INK)
 	warm.set_color("font_color", "SpinBox", Color("3a2418"))
 	warm.set_color("font_color", "LineEdit", Color("3a2418"))
 	var field := StyleBoxFlat.new()
@@ -139,18 +131,57 @@ func _warm_theme() -> Theme:
 	return warm
 
 
-func _rail_button(rail: VBoxContainer, text: String, action: Callable) -> Button:
+func _sign(shelf: HBoxContainer, text: String, color: Color, action: Callable) -> Button:
 	var button := Button.new()
 	button.text = text
-	button.custom_minimum_size = Vector2(0, 48)
+	button.custom_minimum_size = Vector2(0, 52)
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.add_theme_color_override("font_color", CREAM)
+	button.add_theme_color_override("font_hover_color", CREAM)
+	button.add_theme_color_override("font_pressed_color", CREAM)
+	button.add_theme_stylebox_override("normal", _sign_box(color))
+	button.add_theme_stylebox_override("hover", _sign_box(color.lightened(0.08)))
+	button.add_theme_stylebox_override("pressed", _sign_box(color.darkened(0.08)))
+	button.add_theme_stylebox_override("focus", _sign_box(color.lightened(0.08)))
 	button.pressed.connect(action)
-	rail.add_child(button)
+	shelf.add_child(button)
 	return button
+
+
+func _sign_box(color: Color) -> StyleBoxFlat:
+	var box := StyleBoxFlat.new()
+	box.bg_color = color
+	box.corner_radius_top_left = 14
+	box.corner_radius_top_right = 14
+	box.corner_radius_bottom_left = 14
+	box.corner_radius_bottom_right = 14
+	box.content_margin_left = 8
+	box.content_margin_right = 8
+	return box
+
+
+func _paper_box(edge: Color) -> StyleBoxFlat:
+	var box := StyleBoxFlat.new()
+	box.bg_color = PAPER
+	box.border_color = edge
+	box.border_width_left = 1
+	box.border_width_top = 1
+	box.border_width_right = 1
+	box.border_width_bottom = 1
+	box.corner_radius_top_left = 16
+	box.corner_radius_top_right = 16
+	box.corner_radius_bottom_left = 16
+	box.corner_radius_bottom_right = 16
+	box.content_margin_left = 12
+	box.content_margin_right = 12
+	box.content_margin_top = 10
+	box.content_margin_bottom = 10
+	return box
 
 
 func _press_seat(seat: int) -> void:
 	if seat < 0:
-		status = "The director stays in the private room. The company moves when you press the signs."
+		status = "The director stays in the private room. The company moves from the shelf."
 		view = "home"
 		_show_view()
 		return
@@ -176,7 +207,7 @@ func _show_view() -> void:
 	for child in panel.get_children():
 		child.queue_free()
 	if status != "":
-		_add_label(status)
+		_card(GOLD, ["Note", status, ""])
 	if view == "mail":
 		_show_mail()
 	elif view == "paper":
@@ -192,7 +223,38 @@ func _show_view() -> void:
 	elif view.begins_with("person:"):
 		_show_person(view.substr(7))
 	else:
-		_add_label("Press a sign on the right, or a person in a chair. A deal does not move until someone follows it.")
+		_show_home()
+
+
+func _show_home() -> void:
+	_card(SAGE, ["How a box is made", "Buy parts from a supplier", "Staff pack those parts", "The customer pays"])
+	for customer in state._customers():
+		_card(CLAY, [customer.display_name, "Buys " + customer.goods, customer.recipe, state.hearts(customer.love)])
+	_card(SEA, ["Chairs", "Four desks", "Look on Recruit for more people", "Look on Suppliers for more parts"])
+
+
+func _card(tint: Color, columns: Array) -> void:
+	var row := PanelContainer.new()
+	var box := _paper_box(tint)
+	box.bg_color = Color("f4eadc")
+	box.border_width_left = 8
+	box.border_color = tint
+	row.add_theme_stylebox_override("panel", box)
+	var line := HBoxContainer.new()
+	line.add_theme_constant_override("separation", 14)
+	row.add_child(line)
+	for i in columns.size():
+		var text := str(columns[i])
+		if text == "":
+			continue
+		var label := Label.new()
+		label.text = text
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label.add_theme_color_override("font_color", INK)
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		label.custom_minimum_size = Vector2(120 if i == 0 else 0, 0)
+		line.add_child(label)
+	panel.add_child(row)
 
 
 func _add_label(text: String) -> Label:
@@ -234,12 +296,12 @@ func _show_mail() -> void:
 	state.mark_mail_read()
 	mail_button.text = "Mail  0"
 	if state.mail.is_empty():
-		_add_label("The inbox is empty.")
+		_card(SAGE, ["Mail", "The inbox is empty.", ""])
 		return
 	var items: Array = state.mail.duplicate()
 	items.reverse()
 	for item in items:
-		_add_label("Week %d  ·  %s\n%s" % [int(item["week"]), str(item["title"]), str(item["body"])])
+		_card(_mail_tint(str(item["kind"])), ["Week %d" % int(item["week"]), str(item["title"]), str(item["body"])])
 		if str(item["kind"]) == "bailout" and not state.pending_bailout.is_empty():
 			_add_button("Lend the company money", func() -> void:
 				_note(func() -> String: return state.answer_bailout(true))
@@ -250,8 +312,29 @@ func _show_mail() -> void:
 		_add_label("")
 
 
+func _mail_tint(kind: String) -> Color:
+	match kind:
+		"order":
+			return CLAY
+		"application":
+			return PLUM
+		"cooperate":
+			return SEA
+		"government":
+			return SAGE
+		"rate", "ledger":
+			return GOLD
+		"bailout":
+			return CLAY
+		_:
+			return Color("8a7356")
+
+
 func _show_paper() -> void:
-	_add_label(state.newspaper_text())
+	for line in state.newspaper_text().split("\n"):
+		if line == "":
+			continue
+		_card(SAGE, ["Paper", line, ""])
 	_add_button("Comply with the wage floor", func() -> void:
 		_note(func() -> String: return state.comply_wage_floor())
 	)
@@ -268,7 +351,7 @@ func _show_deals(kind: String) -> void:
 		any = true
 		_deal_block(deal)
 	if not any:
-		_add_label("Nothing is waiting here.")
+		_card(CLAY, ["Orders", "Nothing is waiting here.", "Take a customer, then assign a person."])
 
 
 func _deal_block(deal: Dictionary) -> void:
@@ -277,20 +360,14 @@ func _deal_block(deal: Dictionary) -> void:
 	for member_id in deal["crew"]:
 		crew_names.append(state.person(str(member_id)).display_name)
 	var crew_text := "Nobody is following it." if crew_names.is_empty() else ", ".join(crew_names)
-	_add_label("%s  ·  %s  ·  %d units at %d\n%s  %s\nLove %d  %s\nStrength: %s\nBad habit: %s (%s)\nFollowing: %s" % [
+	var bought := partner.goods if partner.goods != "" else "units"
+	_card(CLAY if str(deal["kind"]) == "customer" else SEA, [
 		str(deal["stage"]).capitalize(),
 		partner.display_name,
-		int(deal["units"]),
-		int(deal["unit_price"]),
-		partner.balance,
+		"%d %s at %d" % [int(deal["units"]), bought, int(deal["unit_price"])],
 		state.hearts(partner.love),
-		partner.love,
-		state.hearts(partner.love),
-		partner.gift_line(),
-		partner.habit_line(),
-		partner.severity,
-		crew_text,
 	])
+	_card(GOLD, ["Made by", partner.recipe if partner.recipe != "" else "Staff follow the deal.", "Following: " + crew_text, partner.habit_line()])
 	for hired in state.hired_people():
 		var deal_id := str(deal["id"])
 		var employee_id: String = str(hired.id)
@@ -302,7 +379,7 @@ func _deal_block(deal: Dictionary) -> void:
 func _show_suppliers() -> void:
 	if state.cooperate_from != "":
 		var asking: GameState.Person = state.person(state.cooperate_from)
-		_add_label("%s asks to cooperate at %d a unit." % [asking.display_name, asking.ask])
+		_card(SEA, [asking.display_name, "Sells " + asking.goods, "Asks %d" % asking.ask, state.hearts(asking.love)])
 		_add_button("Accept their price", func() -> void:
 			_note(func() -> String: return state.accept_cooperation())
 		)
@@ -311,17 +388,13 @@ func _show_suppliers() -> void:
 	)
 	for id in state.known_suppliers:
 		var supplier: GameState.Person = state.person(str(id))
-		_add_label("%s  %s  love %d\n%s\nStrength: %s\nBad habit: %s (%s)\nAsk: %d a unit%s" % [
+		_card(SEA, [
 			supplier.display_name,
-			state.hearts(supplier.love),
-			supplier.love,
-			supplier.balance,
-			supplier.gift_line(),
-			supplier.habit_line(),
-			supplier.severity,
-			supplier.ask,
-			"" if supplier.active else "\nThe contract has ended.",
+			"Sells " + supplier.goods,
+			"Ask %d" % supplier.ask,
+			state.hearts(supplier.love) if supplier.active else "Contract ended",
 		])
+		_card(GOLD, [supplier.gift_line(), supplier.habit_line(), supplier.severity, ""])
 		if not supplier.active:
 			continue
 		if state.pending_think.has(supplier.id):
@@ -329,7 +402,7 @@ func _show_suppliers() -> void:
 		var spin := _add_spin(supplier.ask, 1, 200)
 		_bind_supply_offer(supplier.id, spin)
 		_bind_break(supplier.id)
-	_add_label("Open supply deals")
+	_card(SEA, ["Open supply deals", "Parts waiting to be packed", "", ""])
 	_show_deals("supplier")
 
 
@@ -338,10 +411,10 @@ func _show_recruit() -> void:
 		_note(func() -> String: return state.look_for_applicant())
 	)
 	if state.visible_applicants.is_empty():
-		_add_label("Nobody is waiting. Look, or wait for an application in the mail.")
+		_card(PLUM, ["Recruit", "Nobody is waiting.", "Look, or wait for mail."])
 	for id in state.visible_applicants:
 		var applicant: GameState.Person = state.person(str(id))
-		_add_label(state._applicant_card(applicant))
+		_card(PLUM, [applicant.display_name, applicant.gift_line(), applicant.habit_line(), "Ask %d" % applicant.ask])
 		if state.pending_think.has(applicant.id):
 			_bind_insist(applicant.id)
 		var spin := _add_spin(applicant.ask, 10, 2000)
@@ -349,13 +422,14 @@ func _show_recruit() -> void:
 
 
 func _show_bank() -> void:
-	_add_label("The rate on the sign is %s.\nDebt %d. Credit %d.\nA large loan and a good credit record each pull the rate down. The rate also changes on its own some weeks." % [state.rate_text(), state.debt, state.credit])
+	_card(GOLD, ["Rate", state.rate_text(), "Debt %d" % state.debt, "Credit %d" % state.credit])
+	_card(SEA, ["How the rate moves", "A large loan can lower it", "Good credit can lower it", "Some weeks it jitters"])
 	var spin := _add_spin(1000, 100, 20000)
 	_add_button("Borrow this amount", func() -> void:
 		_note(func() -> String: return state.borrow(int(spin.value)))
 	)
 	if not state.pending_bailout.is_empty():
-		_add_label("Someone is asking to borrow company money. The mail has the request.")
+		_card(CLAY, ["Bailout", "Someone wants company money.", "Answer it in the mail."])
 
 
 func _show_person(id: String) -> void:
@@ -366,20 +440,10 @@ func _show_person(id: String) -> void:
 	if not p.hired:
 		_add_label("That chair is empty.")
 		return
-	_add_label("%s\n%s\n%s  love %d\nStrength: %s\nBad habit: %s (%s)\nWorkload step %d. Pace step %d.\nPay %d. Ask %d.%s" % [
-		p.display_name,
-		p.balance,
-		state.hearts(p.love),
-		p.love,
-		p.gift_line(),
-		p.habit_line(),
-		p.severity,
-		p.base_workload,
-		p.base_pace,
-		p.pay,
-		p.ask,
-		"\nOn a course this period. No deal work." if p.training else "",
-	])
+	_card(PLUM, [p.display_name, p.balance, state.hearts(p.love), "Pay %d" % p.pay])
+	_card(SAGE, [p.gift_line(), p.habit_line(), "Workload %d" % p.base_workload, "Pace %d" % p.base_pace])
+	if p.training:
+		_card(GOLD, ["Training", "No deal work this period.", "The salary is still paid.", ""])
 	var spin := _add_spin(p.pay, state.min_wage, 3000)
 	var who: String = p.id
 	_add_button("Set pay", func() -> void:
@@ -395,13 +459,13 @@ func _show_person(id: String) -> void:
 			return text
 		)
 	)
-	_add_label("Deals they can follow")
+	_card(CLAY, ["Deals they can follow", "Assign them from a row below.", "", ""])
 	var any := false
 	for deal in state.open_deals():
 		any = true
 		_deal_block(deal)
 	if not any:
-		_add_label("No open deal. Take an order or a supplier price first.")
+		_card(CLAY, ["No open deal", "Take an order or a supplier price first.", "", ""])
 	if not state.pending_bailout.is_empty() and str(state.pending_bailout["id"]) == p.id:
 		_add_button("Lend %d" % int(state.pending_bailout["amount"]), func() -> void:
 			_note(func() -> String: return state.answer_bailout(true))

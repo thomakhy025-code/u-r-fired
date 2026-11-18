@@ -110,6 +110,8 @@ class Person:
 	var training := false
 	var junior := false
 	var subsidy_weeks := 0
+	var goods := ""
+	var recipe := ""
 
 	func has_strength(gift: String) -> bool:
 		return strengths.has(gift)
@@ -132,16 +134,28 @@ func setup_new_game() -> void:
 	_add(_person("june", "June", "employee", "great strength, minor flaw", ["books", "on_time"], "fuss", "minor", 3, 3, 4, 460, false))
 	_add(_person("otto", "Otto", "employee", "thin strength, serious flaw", ["long_hours"], "steal", "serious", 3, 2, 2, 240, true))
 	_add(_person("ben", "Ben", "employee", "mixed", ["temper_solver", "sales"], "bankruptcy", "serious", 3, 3, 3, 520, false))
-	_add(_person("auntie", "Auntie Shop", "customer", "great strength, minor flaw", ["steady_orders", "on_time"], "cold_week", "minor", 4, 3, 3, 48, false))
-	_add(_person("lau", "Mr. Lau", "customer", "mixed", ["large_pay"], "snap", "serious", 3, 4, 3, 70, false))
-	_add(_person("influencer", "The Influencer", "customer", "thin strength, serious flaw", ["small_mention"], "public_snap", "serious", 2, 2, 2, 30, false))
-	_add(_person("steady", "Steady Supply", "supplier", "great strength, minor flaw", ["deadline_ship", "on_time"], "snap", "minor", 3, 3, 4, 32, false))
-	_add(_person("cheap", "Cheap Parts", "supplier", "thin strength, serious flaw", ["large_lots"], "late_or_junk", "serious", 2, 5, 2, 18, false))
-	_add(_person("north", "North Mill", "supplier", "great strength, minor flaw", ["on_time"], "snap", "minor", 3, 3, 3, 36, false))
+	_add(_person("rosa", "Rosa", "employee", "great strength, minor flaw", ["catch_junk", "on_time"], "late", "minor", 3, 3, 3, 440, false))
+	_add(_person("ken", "Ken", "employee", "mixed", ["long_hours"], "snap", "moderate", 3, 4, 3, 400, false))
+	_add(_person("priya", "Priya", "employee", "great strength, minor flaw", ["books", "sales"], "fuss", "minor", 3, 3, 4, 500, false))
+	_add(_person("sam", "Sam", "employee", "thin strength, serious flaw", ["sales"], "steal", "serious", 3, 2, 3, 260, true))
+	_add(_person("noor", "Noor", "employee", "mixed", ["temper_solver", "catch_junk"], "cold_week", "minor", 3, 3, 3, 470, false))
+	_add(_person("auntie", "Auntie Shop", "customer", "great strength, minor flaw", ["steady_orders", "on_time"], "cold_week", "minor", 4, 3, 3, 48, false, "Snack Boxes", "Staff pack supplier parts into snack boxes."))
+	_add(_person("lau", "Mr. Lau", "customer", "mixed", ["large_pay"], "snap", "serious", 3, 4, 3, 70, false, "Gift Hampers", "Staff pack more parts into gift hampers."))
+	_add(_person("influencer", "The Influencer", "customer", "thin strength, serious flaw", ["small_mention"], "public_snap", "serious", 2, 2, 2, 30, false, "Sample Kits", "Staff pack a few parts into sample kits."))
+	_add(_person("cafe", "Corner Cafe", "customer", "great strength, minor flaw", ["steady_orders"], "cold_week", "minor", 3, 3, 3, 40, false, "Lunch Packs", "Staff pack parts into lunch packs."))
+	_add(_person("school", "School Desk", "customer", "mixed", ["large_pay", "on_time"], "snap", "minor", 3, 3, 3, 44, false, "Class Kits", "Staff pack parts into class kits."))
+	_add(_person("steady", "Steady Supply", "supplier", "great strength, minor flaw", ["deadline_ship", "on_time"], "snap", "minor", 3, 3, 4, 32, false, "card sheets", "Ships card the staff can pack."))
+	_add(_person("cheap", "Cheap Parts", "supplier", "thin strength, serious flaw", ["large_lots"], "late_or_junk", "serious", 2, 5, 2, 18, false, "clips", "Ships a big lot of clips."))
+	_add(_person("north", "North Mill", "supplier", "great strength, minor flaw", ["on_time"], "snap", "minor", 3, 3, 3, 36, false, "sturdy board", "Ships board that packs cleanly."))
+	_add(_person("harbor", "Harbor Paper", "supplier", "great strength, minor flaw", ["deadline_ship"], "snap", "minor", 3, 3, 4, 28, false, "paper rolls", "Ships paper by the deadline."))
+	_add(_person("ink", "Bright Ink", "supplier", "thin strength, serious flaw", ["large_lots"], "late", "serious", 2, 4, 2, 16, false, "ink", "Ships a large lot, sometimes late."))
+	_add(_person("oak", "Oak Crates", "supplier", "mixed", ["on_time"], "snap", "minor", 3, 3, 3, 30, false, "crates", "Ships crates the boxes travel in."))
+	_add(_person("cloth", "Soft Cloth", "supplier", "great strength, minor flaw", ["on_time"], "fuss", "minor", 3, 3, 3, 26, false, "cloth", "Ships cloth for wrapping."))
+	_add(_person("glass", "Night Glass", "supplier", "thin strength, serious flaw", ["large_lots"], "junk", "serious", 2, 4, 2, 14, false, "glass sheets", "Ships glass that can arrive as junk."))
 	visible_applicants = ["mina"]
-	hidden_applicants = ["otto", "june", "ben"]
+	hidden_applicants = ["otto", "june", "ben", "rosa", "ken", "priya", "sam", "noor"]
 	known_suppliers = ["steady", "cheap"]
-	hidden_suppliers = ["north"]
+	hidden_suppliers = ["north", "harbor", "ink", "oak", "cloth", "glass"]
 	cooperate_from = "steady"
 	_recompute_rate(false)
 	policy_blurb = "Week 1. The office is open. These are the rules in force."
@@ -156,7 +170,7 @@ func person(id: String) -> Person:
 	return people[id]
 
 
-func _person(id: String, display_name: String, role: String, balance: String, strengths: Array, habit: String, severity: String, love: int, workload: int, pace: int, ask: int, junior: bool) -> Person:
+func _person(id: String, display_name: String, role: String, balance: String, strengths: Array, habit: String, severity: String, love: int, workload: int, pace: int, ask: int, junior: bool, goods: String = "", recipe: String = "") -> Person:
 	var p := Person.new()
 	p.id = id
 	p.display_name = display_name
@@ -170,6 +184,8 @@ func _person(id: String, display_name: String, role: String, balance: String, st
 	p.base_pace = pace
 	p.ask = ask
 	p.junior = junior
+	p.goods = goods
+	p.recipe = recipe
 	return p
 
 
@@ -395,7 +411,7 @@ func find_supplier() -> String:
 	var id: String = hidden_suppliers.pop_front()
 	known_suppliers.append(id)
 	var p: Person = person(id)
-	_push_mail("Supplier", "You found %s. Their ask is %d a unit. %s" % [p.display_name, p.ask, _profile(p)], "cooperate")
+	_push_mail("Supplier", "You found %s. They sell %s. Their ask is %d a unit. %s" % [p.display_name, p.goods, p.ask, _profile(p)], "cooperate")
 	return "%s is now on the supplier sign." % p.display_name
 
 
@@ -604,10 +620,9 @@ func end_week() -> String:
 	rolled_habits = {}
 	for p in hired_people():
 		rolled_habits[p.id] = _build_habit(p)
-	for id in ["auntie", "lau", "influencer", "steady", "cheap", "north"]:
-		var outsider: Person = person(id)
+	for outsider in _outsiders():
 		if outsider.active:
-			rolled_habits[id] = _build_habit(outsider)
+			rolled_habits[outsider.id] = _build_habit(outsider)
 	_apply_habit_side_effects()
 	var training_lines: Array = []
 	for p in hired_people():
@@ -757,7 +772,7 @@ func _open_order(customer: Person) -> void:
 	if customer.has_strength("steady_orders"):
 		units = 22 + customer.love * 4
 	_make_deal("customer", customer.id, units, customer.ask, units >= 40)
-	_push_mail("Order", "%s sent an order for %d units at %d each. Assign one employee, or a few, before it can move." % [customer.display_name, units, customer.ask], "order")
+	_push_mail("Order", "%s wants %d %s at %d each. %s Assign someone before the packing can move." % [customer.display_name, units, customer.goods, customer.ask, customer.recipe], "order")
 
 
 func _free_seat() -> int:
@@ -1288,10 +1303,28 @@ func _check_endings() -> void:
 
 
 func _customers_all_gone() -> bool:
-	for id in ["auntie", "lau", "influencer"]:
-		if person(id).active:
+	for customer in _customers():
+		if customer.active:
 			return false
 	return true
+
+
+func _customers() -> Array:
+	var found: Array = []
+	for id in people.keys():
+		var p: Person = person(str(id))
+		if p.role == "customer":
+			found.append(p)
+	return found
+
+
+func _outsiders() -> Array:
+	var found: Array = []
+	for id in people.keys():
+		var p: Person = person(str(id))
+		if p.role == "customer" or p.role == "supplier":
+			found.append(p)
+	return found
 
 
 func _lose(reason: String) -> void:
@@ -1321,10 +1354,13 @@ func _begin_week() -> void:
 		_open_order(person("lau"))
 	elif week == 3:
 		_open_order(person("influencer"))
-	elif week > 3:
-		for id in ["auntie", "lau", "influencer"]:
-			var customer: Person = person(id)
-			if customer.active and not _open_deal_for(id) and rng.randf() < 0.45:
+	if week == 4:
+		_open_order(person("cafe"))
+	elif week == 5:
+		_open_order(person("school"))
+	if week > 3:
+		for customer in _customers():
+			if customer.active and not _open_deal_for(customer.id) and rng.randf() < 0.45:
 				_open_order(customer)
 	if not hidden_applicants.is_empty() and rng.randf() < 0.4:
 		look_for_applicant()

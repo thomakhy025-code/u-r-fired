@@ -5,18 +5,23 @@ extends SubViewportContainer
 
 signal seat_pressed(seat: int)
 
-const STAFF := {
-	"mina": {"shirt": Color("2a9d8f"), "hair": Color("241c18"), "skin": Color("f3c7a8")},
-	"june": {"shirt": Color("3d5a80"), "hair": Color("6d4030"), "skin": Color("f6d3b8")},
-	"otto": {"shirt": Color("e07a3d"), "hair": Color("d7b072"), "skin": Color("efc09a")},
-	"ben": {"shirt": Color("c4495a"), "hair": Color("2c2622"), "skin": Color("e8b898")},
+const LOOKS := {
+	"mina": {"shirt": Color("2f7d72"), "hair": Color("241c18"), "skin": Color("e2b896")},
+	"june": {"shirt": Color("3d5a80"), "hair": Color("6d4030"), "skin": Color("e8c4a8")},
+	"otto": {"shirt": Color("c46a32"), "hair": Color("c4a060"), "skin": Color("dcb08a")},
+	"ben": {"shirt": Color("a33d4e"), "hair": Color("2c2622"), "skin": Color("d4a888")},
+	"rosa": {"shirt": Color("6e4d78"), "hair": Color("2a1814"), "skin": Color("e0b090")},
+	"ken": {"shirt": Color("3f6b4a"), "hair": Color("1e1a16"), "skin": Color("d8b090")},
+	"priya": {"shirt": Color("8a5a3a"), "hair": Color("1a1412"), "skin": Color("c48a62")},
+	"sam": {"shirt": Color("3d6a8a"), "hair": Color("d4b48a"), "skin": Color("efc4a4")},
+	"noor": {"shirt": Color("8a3d48"), "hair": Color("3a241c"), "skin": Color("e2b898")},
 }
 
 const TOY_LIGHT := """
 void light() {
 	float facing = dot(NORMAL, LIGHT);
 	float band = step(0.22, facing);
-	float shade = mix(0.62, 0.9, band);
+	float shade = mix(0.5, 0.74, band);
 	DIFFUSE_LIGHT += ALBEDO * LIGHT_COLOR * ATTENUATION * shade;
 }
 """
@@ -24,7 +29,7 @@ void light() {
 var viewport: SubViewport
 var camera: Camera3D
 var game: GameState
-var workers := {}
+var seats: Array[Node3D] = []
 var director: Node3D
 var clock := 0.0
 var _toy: Shader
@@ -69,14 +74,20 @@ func bind_game(next: GameState) -> void:
 func sync_staff() -> void:
 	if game == null:
 		return
-	for id in STAFF.keys():
-		var hired := false
+	for seat in seats.size():
+		var body: Node3D = seats[seat]
+		var sitting: GameState.Person = null
 		for person in game.hired_people():
-			if person.id == id:
-				hired = true
-				_show_worker(id, person)
-		if not hired and workers.has(id):
-			(workers[id] as Node3D).visible = false
+			if person.seat == seat:
+				sitting = person
+				break
+		if sitting == null:
+			body.visible = false
+			continue
+		body.visible = true
+		_dress(body, sitting.id)
+		var label: Label3D = body.get_node("Name")
+		label.text = "%s\n%s" % [sitting.display_name, game.hearts(sitting.love)]
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -89,21 +100,18 @@ func _gui_input(event: InputEvent) -> void:
 		return
 	var mouse := click.position * Vector2(viewport.size) / Vector2(maxi(size.x, 1.0), maxi(size.y, 1.0))
 	var best := -999
-	var best_distance := 64.0
+	var best_distance := 80.0
 	var points := {"director": camera.unproject_position(director.global_position + Vector3(0, 1.0, 0))}
-	for id in workers.keys():
-		var body: Node3D = workers[id]
+	for seat in seats.size():
+		var body: Node3D = seats[seat]
 		if not body.visible:
 			continue
-		points[id] = camera.unproject_position(body.global_position + Vector3(0, 1.0, 0))
+		points[str(seat)] = camera.unproject_position(body.global_position + Vector3(0, 1.0, 0))
 	for key in points.keys():
 		var distance: float = (points[key] as Vector2).distance_to(mouse)
 		if distance < best_distance:
 			best_distance = distance
-			if key == "director":
-				best = -1
-			else:
-				best = game.person(str(key)).seat
+			best = -1 if str(key) == "director" else int(key)
 	if best != -999:
 		seat_pressed.emit(best)
 		accept_event()
@@ -116,9 +124,9 @@ func _process(delta: float) -> void:
 	if game == null:
 		return
 	for person in game.hired_people():
-		if not workers.has(person.id):
+		if person.seat < 0 or person.seat >= seats.size():
 			continue
-		var body: Node3D = workers[person.id]
+		var body: Node3D = seats[person.seat]
 		var arms: Node3D = body.get_node("Arms")
 		var book: Node3D = body.get_node("Book")
 		if person.training:
@@ -138,22 +146,22 @@ func _build_world() -> void:
 	var env := WorldEnvironment.new()
 	var world := Environment.new()
 	world.background_mode = Environment.BG_COLOR
-	world.background_color = Color("7eabbf")
+	world.background_color = Color("5d8496")
 	world.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	world.ambient_light_color = Color("e7d3b8")
-	world.ambient_light_energy = 0.22
+	world.ambient_light_color = Color("cbb79a")
+	world.ambient_light_energy = 0.14
 	world.tonemap_mode = Environment.TONE_MAPPER_ACES
-	world.tonemap_exposure = 0.86
+	world.tonemap_exposure = 0.68
 	world.adjustment_enabled = true
-	world.adjustment_brightness = 0.96
-	world.adjustment_contrast = 1.08
-	world.adjustment_saturation = 1.2
+	world.adjustment_brightness = 0.82
+	world.adjustment_contrast = 1.04
+	world.adjustment_saturation = 0.86
 	env.environment = world
 	root.add_child(env)
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-52, 32, 0)
-	sun.light_color = Color("ffe0b8")
-	sun.light_energy = 0.85
+	sun.light_color = Color("f0d2ae")
+	sun.light_energy = 0.62
 	sun.shadow_enabled = true
 	sun.shadow_opacity = 0.55
 	root.add_child(sun)
@@ -165,9 +173,9 @@ func _build_world() -> void:
 
 	_box(root, Vector3(0, -0.08, 0), Vector3(13.2, 0.16, 9.0), _wood())
 	_box(root, Vector3(-0.35, 0.02, 0.35), Vector3(2.2, 0.025, 1.5), _paint(Color("b85a48")))
-	_box(root, Vector3(0, 1.25, -4.48), Vector3(13.2, 2.5, 0.18), _paint(Color("d7b07a")))
+	_box(root, Vector3(0, 1.25, -4.48), Vector3(13.2, 2.5, 0.18), _paint(Color("b08958")))
 	_box(root, Vector3(0, 0.42, -4.36), Vector3(13.2, 0.84, 0.08), _paint(Color("d09a62")))
-	_box(root, Vector3(-6.5, 1.25, 0), Vector3(0.18, 2.5, 9.0), _paint(Color("d7b07a")))
+	_box(root, Vector3(-6.5, 1.25, 0), Vector3(0.18, 2.5, 9.0), _paint(Color("b08958")))
 	_box(root, Vector3(-6.38, 0.42, 0), Vector3(0.08, 0.84, 9.0), _paint(Color("c98b52")))
 	_box(root, Vector3(2.15, 1.55, -4.34), Vector3(2.7, 1.25, 0.06), _paint(Color("6eafc8")))
 	_box(root, Vector3(2.15, 2.22, -4.32), Vector3(2.95, 0.1, 0.1), _paint(Color("a56b3c")))
@@ -193,23 +201,35 @@ func _build_world() -> void:
 		Vector3(-2.55, 0, -1.45),
 		Vector3(1.85, 0, -1.45),
 	]
-	var mats := [Color("6fbfa3"), Color("e2a84a"), Color("7aa6d4"), Color("e07a62")]
-	var ids := ["mina", "june", "otto", "ben"]
+	var mats := [Color("5f8f78"), Color("b08948"), Color("5d7a92"), Color("a86b58")]
 	for i in spots.size():
 		_place_worker(root, spots[i], mats[i])
-		var look: Dictionary = STAFF[ids[i]]
-		var person := _worker(root, look["shirt"] as Color, look["hair"] as Color, look["skin"] as Color, "")
+		var person := _worker(root, Color("5f8f78"), Color("241c18"), Color("e2b896"), "")
 		person.position = spots[i]
 		person.visible = false
-		workers[ids[i]] = person
+		seats.append(person)
 	sync_staff()
 
 
-func _show_worker(id: String, person: GameState.Person) -> void:
-	var body: Node3D = workers[id]
-	body.visible = true
-	var label: Label3D = body.get_node("Name")
-	label.text = "%s\n%s" % [person.display_name, game.hearts(person.love)]
+func _dress(body: Node3D, id: String) -> void:
+	var look: Dictionary = LOOKS.get(id, {"shirt": Color("5f7d68"), "hair": Color("2c241c"), "skin": Color("e2b896")})
+	var shirt: Color = look["shirt"]
+	var skin: Color = look["skin"]
+	var hair: Color = look["hair"]
+	_set_albedo(body.get_node("Shirt"), shirt)
+	_set_albedo(body.get_node("Skin"), skin)
+	_set_albedo(body.get_node("Hair"), hair)
+	for arm in body.get_node("Arms").get_children():
+		_set_albedo(arm, shirt)
+
+
+func _set_albedo(node: Node, color: Color) -> void:
+	var mesh := node as MeshInstance3D
+	if mesh == null:
+		return
+	var material := mesh.material_override as ShaderMaterial
+	if material != null:
+		material.set_shader_parameter("albedo", color)
 
 
 func _place_worker(parent: Node3D, seat: Vector3, mat: Color) -> void:
@@ -234,7 +254,7 @@ func _workstation(parent: Node3D, at: Vector3, mat: Color) -> void:
 	var desk := Node3D.new()
 	desk.position = at
 	parent.add_child(desk)
-	_box(desk, Vector3(0, 0.7, 0), Vector3(1.34, 0.1, 0.72), _paint(Color("e6c48a")))
+	_box(desk, Vector3(0, 0.7, 0), Vector3(1.34, 0.1, 0.72), _paint(Color("a07a48")))
 	_box(desk, Vector3(0, 0.76, 0.02), Vector3(0.72, 0.025, 0.4), _paint(mat))
 	for x in [-0.54, 0.54]:
 		for z in [-0.26, 0.26]:
@@ -271,6 +291,7 @@ func _worker(parent: Node3D, shirt: Color, hair: Color, skin: Color, title: Stri
 	var person := Node3D.new()
 	parent.add_child(person)
 	var body := MeshInstance3D.new()
+	body.name = "Shirt"
 	var capsule := CapsuleMesh.new()
 	capsule.radius = 0.22
 	capsule.height = 0.46
@@ -279,6 +300,7 @@ func _worker(parent: Node3D, shirt: Color, hair: Color, skin: Color, title: Stri
 	body.material_override = _paint(shirt)
 	person.add_child(body)
 	var head := MeshInstance3D.new()
+	head.name = "Skin"
 	var sphere := SphereMesh.new()
 	sphere.radius = 0.28
 	sphere.height = 0.56
@@ -287,6 +309,7 @@ func _worker(parent: Node3D, shirt: Color, hair: Color, skin: Color, title: Stri
 	head.material_override = _paint(skin)
 	person.add_child(head)
 	var hair_mesh := MeshInstance3D.new()
+	hair_mesh.name = "Hair"
 	var hair_sphere := SphereMesh.new()
 	hair_sphere.radius = 0.26
 	hair_sphere.height = 0.28
@@ -404,7 +427,7 @@ func _shared_toy() -> Shader:
 func _wood() -> ShaderMaterial:
 	if _wood_shader == null:
 		_wood_shader = Shader.new()
-		_wood_shader.code = "shader_type spatial; render_mode specular_disabled; void fragment() { vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; float band = fract(world.x * 0.72); float seam = step(0.055, band); float grain = step(0.88, fract(world.z * 0.5)); vec3 plank = mix(vec3(0.48, 0.26, 0.1), vec3(0.66, 0.38, 0.16), seam); ALBEDO = mix(plank, plank * 0.8, grain); }\n" + TOY_LIGHT
+		_wood_shader.code = "shader_type spatial; render_mode specular_disabled; void fragment() { vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; float band = fract(world.x * 0.72); float seam = step(0.055, band); float grain = step(0.88, fract(world.z * 0.5)); vec3 plank = mix(vec3(0.32, 0.17, 0.07), vec3(0.46, 0.26, 0.11), seam); ALBEDO = mix(plank, plank * 0.82, grain); }\n" + TOY_LIGHT
 	var material := ShaderMaterial.new()
 	material.shader = _wood_shader
 	return material
