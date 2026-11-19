@@ -31,6 +31,10 @@ var camera: Camera3D
 var game: GameState
 var seats: Array[Node3D] = []
 var director: Node3D
+var phone: Node3D
+var phone_lamp: MeshInstance3D
+var ready_boxes: Array[MeshInstance3D] = []
+var ready_label: Label3D
 var clock := 0.0
 var _toy: Shader
 var _wood_shader: Shader
@@ -87,7 +91,8 @@ func sync_staff() -> void:
 		body.visible = true
 		_dress(body, sitting.id)
 		var label: Label3D = body.get_node("Name")
-		label.text = "%s\n%s" % [sitting.display_name, game.hearts(sitting.love)]
+		label.text = "%s\n%s %s" % [sitting.display_name, game.hearts(sitting.love), _mood(sitting.love)]
+	_sync_outbox()
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -102,6 +107,8 @@ func _gui_input(event: InputEvent) -> void:
 	var best := -999
 	var best_distance := 80.0
 	var points := {"director": camera.unproject_position(director.global_position + Vector3(0, 1.0, 0))}
+	if phone != null:
+		points["phone"] = camera.unproject_position(phone.global_position + Vector3(0, 0.7, 0))
 	for seat in seats.size():
 		var body: Node3D = seats[seat]
 		if not body.visible:
@@ -111,7 +118,12 @@ func _gui_input(event: InputEvent) -> void:
 		var distance: float = (points[key] as Vector2).distance_to(mouse)
 		if distance < best_distance:
 			best_distance = distance
-			best = -1 if str(key) == "director" else int(key)
+			if str(key) == "director":
+				best = -1
+			elif str(key) == "phone":
+				best = -2
+			else:
+				best = int(key)
 	if best != -999:
 		seat_pressed.emit(best)
 		accept_event()
@@ -129,15 +141,59 @@ func _process(delta: float) -> void:
 		var body: Node3D = seats[person.seat]
 		var arms: Node3D = body.get_node("Arms")
 		var book: Node3D = body.get_node("Book")
+		var working: bool = person.training
+		if not working:
+			for deal in game.deals:
+				var stage := str(deal["stage"])
+				if stage == "closed" or stage == "offer" or stage == "quality":
+					continue
+				if (deal["crew"] as Array).has(person.id):
+					working = true
+					break
+		var label: Label3D = body.get_node("Name")
+		label.text = "%s\n%s %s" % [person.display_name, game.hearts(person.love), _mood(person.love)]
 		if person.training:
 			book.visible = true
 			arms.rotation.x = sin(clock * 1.4) * 0.08
 		else:
-			book.visible = false
+			book.visible = working
 			var pace := 0.7 + game.heart_scale(person.love) * 1.8 + float(person.base_pace) * 0.15
 			arms.rotation.x = sin(clock * 7.0 * pace + float(person.seat)) * 0.28
-		var label: Label3D = body.get_node("Name")
-		label.text = "%s\n%s" % [person.display_name, game.hearts(person.love)]
+	_ring_phone()
+
+
+func _mood(love: int) -> String:
+	if love >= 4:
+		return "glad"
+	if love >= 3:
+		return "steady"
+	if love >= 2:
+		return "cool"
+	return "upset"
+
+
+func _ring_phone() -> void:
+	if phone == null or phone_lamp == null:
+		return
+	var ringing := false
+	for deal in game.deals:
+		if str(deal["kind"]) == "customer" and str(deal["stage"]) == "offer":
+			ringing = true
+			break
+	var flash := ringing and sin(clock * 10.0) > 0.0
+	phone.position.y = 0.05 if flash else 0.0
+	_set_albedo(phone_lamp, Color("e23b3b") if flash else Color("7a3030"))
+
+
+func _sync_outbox() -> void:
+	if ready_label == null:
+		return
+	ready_label.text = "Ready\n%d" % game.stock
+	var shown := 0
+	if game.stock > 0:
+		shown = clampi(int(ceil(float(game.stock) / 8.0)), 1, ready_boxes.size())
+	for i in ready_boxes.size():
+		ready_boxes[i].visible = i < shown
 
 
 func _build_world() -> void:
@@ -146,22 +202,22 @@ func _build_world() -> void:
 	var env := WorldEnvironment.new()
 	var world := Environment.new()
 	world.background_mode = Environment.BG_COLOR
-	world.background_color = Color("5d8496")
+	world.background_color = Color("4e94b8")
 	world.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	world.ambient_light_color = Color("cbb79a")
-	world.ambient_light_energy = 0.14
+	world.ambient_light_color = Color("f2d2b0")
+	world.ambient_light_energy = 0.24
 	world.tonemap_mode = Environment.TONE_MAPPER_ACES
-	world.tonemap_exposure = 0.68
+	world.tonemap_exposure = 0.84
 	world.adjustment_enabled = true
-	world.adjustment_brightness = 0.82
-	world.adjustment_contrast = 1.04
-	world.adjustment_saturation = 0.86
+	world.adjustment_brightness = 0.92
+	world.adjustment_contrast = 1.06
+	world.adjustment_saturation = 1.08
 	env.environment = world
 	root.add_child(env)
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-52, 32, 0)
-	sun.light_color = Color("f0d2ae")
-	sun.light_energy = 0.62
+	sun.light_color = Color("ffe0b0")
+	sun.light_energy = 0.78
 	sun.shadow_enabled = true
 	sun.shadow_opacity = 0.55
 	root.add_child(sun)
@@ -172,12 +228,12 @@ func _build_world() -> void:
 	root.add_child(camera)
 
 	_box(root, Vector3(0, -0.08, 0), Vector3(13.2, 0.16, 9.0), _wood())
-	_box(root, Vector3(-0.35, 0.02, 0.35), Vector3(2.2, 0.025, 1.5), _paint(Color("b85a48")))
-	_box(root, Vector3(0, 1.25, -4.48), Vector3(13.2, 2.5, 0.18), _paint(Color("b08958")))
-	_box(root, Vector3(0, 0.42, -4.36), Vector3(13.2, 0.84, 0.08), _paint(Color("d09a62")))
-	_box(root, Vector3(-6.5, 1.25, 0), Vector3(0.18, 2.5, 9.0), _paint(Color("b08958")))
-	_box(root, Vector3(-6.38, 0.42, 0), Vector3(0.08, 0.84, 9.0), _paint(Color("c98b52")))
-	_box(root, Vector3(2.15, 1.55, -4.34), Vector3(2.7, 1.25, 0.06), _paint(Color("6eafc8")))
+	_box(root, Vector3(-0.35, 0.02, 0.15), Vector3(3.4, 0.03, 2.2), _rug())
+	_box(root, Vector3(0, 1.25, -4.48), Vector3(13.2, 2.5, 0.18), _paint(Color("e08958")))
+	_box(root, Vector3(0, 0.42, -4.36), Vector3(13.2, 0.84, 0.08), _paint(Color("f0c27a")))
+	_box(root, Vector3(-6.5, 1.25, 0), Vector3(0.18, 2.5, 9.0), _paint(Color("d97848")))
+	_box(root, Vector3(-6.38, 0.42, 0), Vector3(0.08, 0.84, 9.0), _paint(Color("f0c27a")))
+	_box(root, Vector3(2.15, 1.55, -4.34), Vector3(2.7, 1.25, 0.06), _paint(Color("7ec8e3")))
 	_box(root, Vector3(2.15, 2.22, -4.32), Vector3(2.95, 0.1, 0.1), _paint(Color("a56b3c")))
 	_box(root, Vector3(2.15, 0.88, -4.32), Vector3(2.95, 0.1, 0.1), _paint(Color("a56b3c")))
 	_box(root, Vector3(0.85, 1.55, -4.32), Vector3(0.08, 1.35, 0.1), _paint(Color("a56b3c")))
@@ -186,6 +242,8 @@ func _build_world() -> void:
 	_plant(root, Vector3(-5.35, 0, 2.9))
 	_plant(root, Vector3(5.2, 0, -2.7))
 	_shelf(root, Vector3(-5.45, 0, -3.15))
+	phone = _phone(root, Vector3(4.35, 0, 2.35))
+	_outbox(root, Vector3(4.55, 0, -0.15))
 	_lamp(root, Vector3(-0.4, 2.15, 0.2))
 	_lamp(root, Vector3(2.8, 2.15, 0.2))
 
@@ -201,7 +259,7 @@ func _build_world() -> void:
 		Vector3(-2.55, 0, -1.45),
 		Vector3(1.85, 0, -1.45),
 	]
-	var mats := [Color("5f8f78"), Color("b08948"), Color("5d7a92"), Color("a86b58")]
+	var mats := [Color("3faf8a"), Color("e0a04a"), Color("3d8ec4"), Color("e06a58")]
 	for i in spots.size():
 		_place_worker(root, spots[i], mats[i])
 		var person := _worker(root, Color("5f8f78"), Color("241c18"), Color("e2b896"), "")
@@ -359,9 +417,69 @@ func _worker(parent: Node3D, shirt: Color, hair: Color, skin: Color, title: Stri
 	label.modulate = Color("2c261f")
 	label.outline_size = 10
 	label.outline_modulate = Color("fffaf3")
+	label.font = ThemeDB.fallback_font
 	label.no_depth_test = true
 	person.add_child(label)
 	return person
+
+
+func _phone(parent: Node3D, at: Vector3) -> Node3D:
+	var desk := Node3D.new()
+	desk.position = at
+	parent.add_child(desk)
+	_box(desk, Vector3(0, 0.62, 0), Vector3(1.15, 0.1, 0.7), _paint(Color("f2d2a8")))
+	for x in [-0.46, 0.46]:
+		for z in [-0.26, 0.26]:
+			_box(desk, Vector3(x, 0.3, z), Vector3(0.08, 0.58, 0.08), _paint(Color("c9844e")))
+	_box(desk, Vector3(0, 0.74, 0.02), Vector3(0.42, 0.08, 0.28), _paint(Color("f7f1e4")))
+	_box(desk, Vector3(-0.1, 0.86, 0.02), Vector3(0.22, 0.08, 0.1), _paint(Color("2f3544")))
+	phone_lamp = _box(desk, Vector3(0.22, 0.86, 0.08), Vector3(0.1, 0.1, 0.1), _paint(Color("7a3030")))
+	var sign := Label3D.new()
+	sign.text = "Phone"
+	sign.position = Vector3(0, 1.25, 0)
+	sign.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	sign.font_size = 48
+	sign.pixel_size = 0.004
+	sign.modulate = Color("2c261f")
+	sign.outline_size = 8
+	sign.outline_modulate = Color("fffaf3")
+	sign.font = ThemeDB.fallback_font
+	sign.no_depth_test = true
+	desk.add_child(sign)
+	return desk
+
+
+func _outbox(parent: Node3D, at: Vector3) -> void:
+	var counter := Node3D.new()
+	counter.position = at
+	parent.add_child(counter)
+	_box(counter, Vector3(0, 0.58, 0), Vector3(1.5, 0.12, 0.7), _paint(Color("f7f1e4")))
+	_box(counter, Vector3(0, 0.28, 0), Vector3(1.4, 0.48, 0.62), _paint(Color("e06a58")))
+	var colors := [Color("3faf8a"), Color("e0a04a"), Color("3d8ec4"), Color("f2d2a8")]
+	for i in colors.size():
+		var parcel := _box(counter, Vector3(-0.48 + float(i) * 0.32, 0.78, 0.02), Vector3(0.26, 0.22, 0.26), _paint(colors[i]))
+		parcel.visible = false
+		ready_boxes.append(parcel)
+	ready_label = Label3D.new()
+	ready_label.text = "Ready\n0"
+	ready_label.position = Vector3(0, 1.25, 0)
+	ready_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	ready_label.font_size = 42
+	ready_label.pixel_size = 0.004
+	ready_label.modulate = Color("2c261f")
+	ready_label.outline_size = 8
+	ready_label.outline_modulate = Color("fffaf3")
+	ready_label.font = ThemeDB.fallback_font
+	ready_label.no_depth_test = true
+	counter.add_child(ready_label)
+
+
+func _rug() -> ShaderMaterial:
+	var shader := Shader.new()
+	shader.code = "shader_type spatial; render_mode cull_back, specular_disabled; void fragment() { vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; float cx = step(0.5, fract(world.x * 1.1)); float cz = step(0.5, fract(world.z * 1.1)); float check = abs(cx - cz); ALBEDO = mix(vec3(0.86, 0.32, 0.28), vec3(0.96, 0.78, 0.48), check); }\n" + TOY_LIGHT
+	var material := ShaderMaterial.new()
+	material.shader = shader
+	return material
 
 
 func _plant(parent: Node3D, at: Vector3) -> void:
@@ -427,7 +545,7 @@ func _shared_toy() -> Shader:
 func _wood() -> ShaderMaterial:
 	if _wood_shader == null:
 		_wood_shader = Shader.new()
-		_wood_shader.code = "shader_type spatial; render_mode specular_disabled; void fragment() { vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; float band = fract(world.x * 0.72); float seam = step(0.055, band); float grain = step(0.88, fract(world.z * 0.5)); vec3 plank = mix(vec3(0.32, 0.17, 0.07), vec3(0.46, 0.26, 0.11), seam); ALBEDO = mix(plank, plank * 0.82, grain); }\n" + TOY_LIGHT
+		_wood_shader.code = "shader_type spatial; render_mode specular_disabled; void fragment() { vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; float band = fract(world.x * 0.72); float seam = step(0.055, band); float grain = step(0.88, fract(world.z * 0.5)); vec3 plank = mix(vec3(0.55, 0.32, 0.12), vec3(0.78, 0.50, 0.20), seam); ALBEDO = mix(plank, plank * 0.86, grain); }\n" + TOY_LIGHT
 	var material := ShaderMaterial.new()
 	material.shader = _wood_shader
 	return material

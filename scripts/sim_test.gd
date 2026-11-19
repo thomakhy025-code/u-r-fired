@@ -144,7 +144,7 @@ func _check_offers() -> void:
 func _check_deals_and_reports() -> void:
 	var game := _fresh()
 	game.end_week()
-	_ok(not _mail_blob(game).contains("Proposal."), "a deal with nobody on it waits")
+	_ok(not _mail_blob(game).contains("On the call."), "a deal with nobody on it waits")
 	game = _fresh()
 	game.recruit_offer("mina", 480)
 	game.stock = 500
@@ -155,14 +155,14 @@ func _check_deals_and_reports() -> void:
 	var deal_id := str(deal["id"])
 	game.end_week()
 	var blob := _mail_blob(game)
-	_ok(blob.contains("Proposal."), "the first report is the proposal")
+	_ok(blob.contains("On the call."), "the first report is the proposal")
 	_ok(blob.contains("Auntie Shop") and blob.contains("Mina"), "the report names every stakeholder")
 	_ok(blob.contains("Auntie Shop ") and blob.contains("Mina "), "the report lists their love")
 	game.end_week()
-	_ok(_mail_blob(game).contains("Doing."), "the second report is doing")
+	_ok(_mail_blob(game).contains("At the desk."), "the second report is doing")
 	game.end_week()
 	var finished := _mail_blob(game)
-	_ok(finished.contains("Almost finish."), "the third report is almost finish")
+	_ok(finished.contains("Ready to send."), "the third report is almost finish")
 	var closed := false
 	for item in game.deals:
 		if str(item["id"]) == deal_id:

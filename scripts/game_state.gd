@@ -144,11 +144,11 @@ func setup_new_game() -> void:
 	_add(_person("priya", "Priya", "employee", "great strength, minor flaw", ["books", "sales"], "fuss", "minor", 3, 3, 4, 500, false))
 	_add(_person("sam", "Sam", "employee", "thin strength, serious flaw", ["sales"], "steal", "serious", 3, 2, 3, 260, true))
 	_add(_person("noor", "Noor", "employee", "mixed", ["temper_solver", "catch_junk"], "cold_week", "minor", 3, 3, 3, 470, false))
-	_add(_person("auntie", "Auntie Shop", "customer", "great strength, minor flaw", ["steady_orders", "on_time"], "cold_week", "minor", 4, 3, 3, 48, false, "Snack Boxes", "Staff pack supplier parts into snack boxes."))
-	_add(_person("lau", "Mr. Lau", "customer", "mixed", ["large_pay"], "snap", "serious", 3, 4, 3, 70, false, "Gift Hampers", "Staff pack more parts into gift hampers."))
-	_add(_person("influencer", "The Influencer", "customer", "thin strength, serious flaw", ["small_mention"], "public_snap", "serious", 2, 2, 2, 30, false, "Sample Kits", "Staff pack a few parts into sample kits."))
-	_add(_person("cafe", "Corner Cafe", "customer", "great strength, minor flaw", ["steady_orders"], "cold_week", "minor", 3, 3, 3, 40, false, "Lunch Packs", "Staff pack parts into lunch packs."))
-	_add(_person("school", "School Desk", "customer", "mixed", ["large_pay", "on_time"], "snap", "minor", 3, 3, 3, 44, false, "Class Kits", "Staff pack parts into class kits."))
+	_add(_person("auntie", "Auntie Shop", "customer", "great strength, minor flaw", ["steady_orders", "on_time"], "cold_week", "minor", 4, 3, 3, 48, false, "Snack Boxes", "A desk prepares snack boxes from supplier stock."))
+	_add(_person("lau", "Mr. Lau", "customer", "mixed", ["large_pay"], "snap", "serious", 3, 4, 3, 70, false, "Gift Hampers", "A desk prepares gift hampers from a larger stock."))
+	_add(_person("influencer", "The Influencer", "customer", "thin strength, serious flaw", ["small_mention"], "public_snap", "serious", 2, 2, 2, 30, false, "Sample Kits", "A desk prepares a small run of sample kits."))
+	_add(_person("cafe", "Corner Cafe", "customer", "great strength, minor flaw", ["steady_orders"], "cold_week", "minor", 3, 3, 3, 40, false, "Lunch Packs", "A desk prepares lunch packs from supplier stock."))
+	_add(_person("school", "School Desk", "customer", "mixed", ["large_pay", "on_time"], "snap", "minor", 3, 3, 3, 44, false, "Class Kits", "A desk prepares class kits from supplier stock."))
 	_add(_person("steady", "Steady Supply", "supplier", "great strength, minor flaw", ["deadline_ship", "on_time"], "snap", "minor", 3, 3, 4, 32, false, "card sheets", "Ships card the staff can pack."))
 	_add(_person("cheap", "Cheap Parts", "supplier", "thin strength, serious flaw", ["large_lots"], "late_or_junk", "serious", 2, 5, 2, 18, false, "clips", "Ships a big lot of clips."))
 	_add(_person("north", "North Mill", "supplier", "great strength, minor flaw", ["on_time"], "snap", "minor", 3, 3, 3, 36, false, "sturdy board", "Ships board that packs cleanly."))
@@ -812,7 +812,7 @@ func accept_order(deal_id: String) -> String:
 	deal["stage"] = "proposal"
 	deal["reserved"] = false
 	var buyer: Person = person(str(deal["partner_id"]))
-	return "Accepted %s. Assign someone, and find a supplier if the parts are not here. If this goes well, they may return at a higher price." % buyer.goods
+	return "Picked up %s. Assign a desk, and find a supplier if the stock is not here. If this goes well, they may call back at a higher price." % buyer.goods
 
 
 func reject_order(deal_id: String) -> String:
@@ -886,7 +886,7 @@ func _open_order(customer: Person) -> void:
 	if customer.has_strength("steady_orders"):
 		units = 22 + customer.love * 4
 	_make_deal("customer", customer.id, units, customer.ask, units >= 40, "offer")
-	_push_mail("Order", "%s wants %d %s at %d each. %s Accept it, or reject it. On Market you can sell the parts straight into this order when your price is one they will pay." % [customer.display_name, units, customer.goods, customer.ask, customer.recipe], "order")
+	_push_mail("Phone", "%s is calling for %d %s at %d each. %s Pick up the phone, or let it ring out. On Market you can send ready stock if your price is one they will pay." % [customer.display_name, units, customer.goods, customer.ask, customer.recipe], "order")
 
 
 func _free_seat() -> int:
@@ -1092,9 +1092,9 @@ func _resolve_stage(deal: Dictionary) -> void:
 	if str(deal["kind"]) == "customer" and not bool(deal.get("reserved", false)):
 		var need := int(deal["units"])
 		if stock < need:
-			var waiting := "Parts for %s" % partner.display_name
+			var waiting := "Supplies for %s" % partner.display_name
 			if not _mail_has_title(waiting):
-				_push_mail(waiting, "%s is accepted. The office has %d parts and this order needs %d. Packing waits until a supplier sends them. You pay the supplier when the parts arrive." % [partner.display_name, stock, need], "order")
+				_push_mail(waiting, "%s is on the call. The outbox has %d and this call needs %d. The desk waits until a supplier sends the stock. You pay when it arrives." % [partner.display_name, stock, need], "order")
 			return
 		stock -= need
 		deal["reserved"] = true
@@ -1257,11 +1257,11 @@ func _append_visible_habit(lines: Array, incident: Dictionary, writer: Person) -
 func _stage_name(stage: String) -> String:
 	match stage:
 		"proposal":
-			return "Proposal"
+			return "On the call"
 		"doing":
-			return "Doing"
+			return "At the desk"
 		_:
-			return "Almost finish"
+			return "Ready to send"
 
 
 func _stage_work_line(stage_name: String, crew: Array, total: int, demand: int, on_time: bool) -> String:
@@ -1271,9 +1271,9 @@ func _stage_work_line(stage_name: String, crew: Array, total: int, demand: int, 
 		if pace_rank(member) > pace_rank(lead):
 			lead = member
 			when = pace_day(member)
-	if stage_name == "Proposal":
-		var cover := "most of the order" if float(total) / float(maxi(demand, 1)) >= 0.75 else "a thin slice of the order"
-		return "%s answered by %s. The opening covers %s." % [lead.display_name, when, cover]
+	if stage_name == "On the call":
+		var cover := "most of the call" if float(total) / float(maxi(demand, 1)) >= 0.75 else "a thin slice of the call"
+		return "%s picked up the work by %s. The opening covers %s." % [lead.display_name, when, cover]
 	var date := " The finished goods hit the date." if on_time else " The date is open."
 	return "%s checked %d of %d by %s.%s" % [lead.display_name, total, demand, when, date]
 
@@ -1423,7 +1423,7 @@ func _credit_tick() -> void:
 func _ledger() -> void:
 	var profit := week_revenue - week_wages - week_supplier - week_training - week_interest
 	lifetime_profit += profit - week_revenue
-	_push_mail("Ledger", "Orders paid: %d\nSuppliers: %d\nWages: %d\nTraining: %d\nInterest: %d\nUnpaid penalties: %d\nDebt: %d\nParts: %d\nCash now: %d" % [week_revenue, week_supplier, week_wages, week_training, week_interest, penalty_unpaid, debt, stock, cash], "ledger")
+	_push_mail("Ledger", "Calls paid: %d\nSuppliers: %d\nWages: %d\nTraining: %d\nInterest: %d\nUnpaid penalties: %d\nDebt: %d\nReady: %d\nCash now: %d" % [week_revenue, week_supplier, week_wages, week_training, week_interest, penalty_unpaid, debt, stock, cash], "ledger")
 
 
 func best_worker_name() -> String:

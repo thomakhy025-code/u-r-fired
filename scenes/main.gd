@@ -32,6 +32,13 @@ var rank_rows: Array = []
 var market_rows: Array = []
 var paid_sales := {}
 var chosen_employee := ""
+var call_card: PanelContainer
+var call_title: Label
+var call_body: Label
+var call_fill: ColorRect
+var call_id := ""
+var call_left := 0.0
+const CALL_PATIENCE := 48.0
 
 
 func _ready() -> void:
@@ -104,7 +111,7 @@ func _build() -> void:
 
 	mail_button = _sign(shelf, "Mail", SAGE, func() -> void: view = "mail"; _show_view())
 	_sign(shelf, "Paper", Color("8a7356"), func() -> void: view = "paper"; _show_view())
-	_sign(shelf, "Orders", CLAY, func() -> void: view = "orders"; _show_view())
+	_sign(shelf, "Calls", CLAY, func() -> void: view = "orders"; _show_view())
 	_sign(shelf, "Suppliers", SEA, func() -> void: view = "suppliers"; _show_view())
 	_sign(shelf, "Recruit", PLUM, func() -> void: view = "recruit"; _show_view())
 	bank_button = _sign(shelf, "Bank", GOLD, func() -> void: view = "bank"; _show_view())
@@ -119,6 +126,7 @@ func _build() -> void:
 		cloud.load_market()
 		_show_view()
 	)
+	_build_call(hud)
 	end_button = _sign(shelf, "End week", MOSS, func() -> void:
 		status = state.end_week()
 		view = "mail"
@@ -219,6 +227,11 @@ func _paper_box(edge: Color) -> StyleBoxFlat:
 
 
 func _press_seat(seat: int) -> void:
+	if seat == -2:
+		view = "orders"
+		status = "The phone is the call desk. A ringing light means someone is waiting."
+		_show_view()
+		return
 	if seat < 0:
 		status = "The director stays in the private room. The company moves from the shelf."
 		view = "home"
@@ -234,7 +247,7 @@ func _press_seat(seat: int) -> void:
 
 
 func _show_view() -> void:
-	header.text = "%s    Week %d    Cash %d    Parts %d    Debt %d" % [state.company_name, state.week, state.cash, state.stock, state.debt]
+	header.text = "%s    Week %d    Cash %d    Ready %d    Debt %d" % [state.company_name, state.week, state.cash, state.stock, state.debt]
 	if state.lost:
 		header.text += "\n" + state.loss_reason
 	elif state.season_held:
@@ -270,10 +283,10 @@ func _show_view() -> void:
 
 
 func _show_home() -> void:
-	_card(SAGE, ["How a box is made", "Buy parts from a supplier", "Staff pack those parts", "The customer pays"])
+	_card(SAGE, ["How a call becomes a box", "The phone rings", "A desk prepares the work", "The outbox sends it"])
 	for customer in state._customers():
 		_card(CLAY, [customer.display_name, "Buys " + customer.goods, customer.recipe, "Love %s" % state.hearts(customer.love)], customer.id)
-	_card(SEA, ["Chairs", "Four desks", "Look on Recruit for more people", "Look on Suppliers for more parts"])
+	_card(SEA, ["The floor", "Four desks, one phone, one outbox", "Calls wait on the phone", "Ready stock sits on the outbox"])
 
 
 func _card(tint: Color, columns: Array, face_id: String = "") -> void:
@@ -397,7 +410,7 @@ func _show_deals(kind: String) -> void:
 		any = true
 		_deal_block(deal)
 	if not any:
-		_card(CLAY, ["Orders", "Nothing is waiting here.", "Take a customer, then assign a person."])
+		_card(CLAY, ["Calls", "The phone is quiet.", "Hire someone and a customer will call."])
 
 
 func _deal_block(deal: Dictionary) -> void:
@@ -408,17 +421,19 @@ func _deal_block(deal: Dictionary) -> void:
 	var crew_text := "Nobody is following it." if crew_names.is_empty() else ", ".join(crew_names)
 	var bought := partner.goods if partner.goods != "" else "units"
 	_card(CLAY if str(deal["kind"]) == "customer" else SEA, [
-		str(deal["stage"]).capitalize(),
+		_call_stage(str(deal["stage"])) if str(deal["kind"]) == "customer" else str(deal["stage"]).capitalize(),
 		partner.display_name,
 		"%d %s at %d" % [int(deal["units"]), bought, int(deal["unit_price"])],
 		"Love %s" % state.hearts(partner.love),
 	], partner.id)
 	if str(deal["stage"]) == "offer":
 		var offer_id := str(deal["id"])
-		_add_button("Accept order", func() -> void:
+		_add_button("Pick up", func() -> void:
+			call_id = ""
 			_note(func() -> String: return state.accept_order(offer_id))
 		)
-		_add_button("Reject order", func() -> void:
+		_add_button("Let it ring out", func() -> void:
+			call_id = ""
 			_note(func() -> String: return state.reject_order(offer_id))
 		)
 	elif str(deal["stage"]) == "quality":
@@ -596,9 +611,9 @@ func _build_gate() -> void:
 	for line in [
 		"1. Name the company. You are the director. You do not walk. You press the shelf.",
 		"2. Hire someone on Recruit. There are four chairs. Signed in, the person you hire cannot be hired by another player.",
-		"3. An order arrives. Accept it, or reject it. Accept, and they may come back at a higher price. Reject, and they may not return.",
-		"4. While the order is open, find a supplier. You pay cash when the parts arrive. Packing starts once those parts are in the office.",
-		"5. You are paid when the customer takes the goods. On Market, sell parts straight into an order when your price is one they will pay. Inventory quantity is the Qty column.",
+		"3. The phone rings. Pick it up, or let it ring out. Pick up, and they may call back at a higher price. Let it ring out, and they may not call again.",
+		"4. While the call is open, find a supplier. You pay cash when the supplies arrive. A desk starts once those supplies are in the office.",
+		"5. You are paid when the caller takes the goods. On Market, the Ready column is the outbox. Sell that stock when your price is one they will pay.",
 		"6. If they dislike the quality, choose a refund or a discount. Choose an employee on Market to sell them to another company.",
 		"Love is a number out of 5. It changes how much and how fast the work goes. It does not stop a bad habit.",
 	]:
@@ -760,10 +775,134 @@ func _show_rank() -> void:
 		])
 
 
+func _build_call(parent: Control) -> void:
+	call_card = PanelContainer.new()
+	call_card.visible = false
+	call_card.mouse_filter = Control.MOUSE_FILTER_STOP
+	call_card.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	call_card.offset_left = -250
+	call_card.offset_top = 58
+	call_card.offset_right = 250
+	call_card.offset_bottom = 250
+	call_card.add_theme_stylebox_override("panel", _paper_box(Color("e06a58")))
+	parent.add_child(call_card)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 6)
+	call_card.add_child(box)
+	call_title = Label.new()
+	call_title.add_theme_font_override("font", ThemeDB.fallback_font)
+	call_title.add_theme_font_size_override("font_size", 22)
+	call_title.add_theme_color_override("font_color", INK)
+	box.add_child(call_title)
+	call_body = Label.new()
+	call_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	call_body.custom_minimum_size = Vector2(420, 0)
+	call_body.add_theme_font_override("font", ThemeDB.fallback_font)
+	call_body.add_theme_color_override("font_color", INK)
+	box.add_child(call_body)
+	var track := ColorRect.new()
+	track.custom_minimum_size = Vector2(420, 16)
+	track.color = Color("3a2c24")
+	box.add_child(track)
+	call_fill = ColorRect.new()
+	call_fill.set_anchors_preset(Control.PRESET_FULL_RECT)
+	call_fill.color = Color("3f9a4a")
+	track.add_child(call_fill)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	box.add_child(row)
+	var pick := Button.new()
+	pick.text = "Pick up"
+	pick.add_theme_font_override("font", ThemeDB.fallback_font)
+	pick.pressed.connect(_pick_up)
+	row.add_child(pick)
+	var leave := Button.new()
+	leave.text = "Let it ring out"
+	leave.add_theme_font_override("font", ThemeDB.fallback_font)
+	leave.pressed.connect(_ring_out)
+	row.add_child(leave)
+
+
+func _process(delta: float) -> void:
+	if not started or call_card == null or state == null or state.lost:
+		if call_card != null:
+			call_card.visible = false
+		return
+	var offer := _waiting_call()
+	if offer.is_empty():
+		call_id = ""
+		call_card.visible = false
+		return
+	var id := str(offer["id"])
+	if id != call_id:
+		call_id = id
+		call_left = CALL_PATIENCE
+	call_left = maxf(call_left - delta, 0.0)
+	var buyer: GameState.Person = state.person(str(offer["partner_id"]))
+	var goods := buyer.goods if buyer.goods != "" else "units"
+	call_title.text = "%s is calling" % buyer.display_name
+	call_body.text = "%d %s at %d each. The bar is how long they stay on the line." % [int(offer["units"]), goods, int(offer["unit_price"])]
+	var ratio := clampf(call_left / CALL_PATIENCE, 0.0, 1.0)
+	call_fill.offset_right = -420.0 * (1.0 - ratio)
+	call_fill.color = Color("3f9a4a").lerp(Color("c4473a"), 1.0 - ratio)
+	call_card.visible = true
+	if call_left <= 0.0:
+		var ended := call_id
+		call_id = ""
+		call_card.visible = false
+		status = state.reject_order(ended)
+		_show_view()
+
+
+func _waiting_call() -> Dictionary:
+	for deal in state.open_deals():
+		if str(deal["kind"]) == "customer" and str(deal["stage"]) == "offer":
+			return deal
+	return {}
+
+
+func _pick_up() -> void:
+	if call_id == "":
+		return
+	var id := call_id
+	call_id = ""
+	call_card.visible = false
+	status = state.accept_order(id)
+	view = "orders"
+	_show_view()
+
+
+func _ring_out() -> void:
+	if call_id == "":
+		return
+	var id := call_id
+	call_id = ""
+	call_card.visible = false
+	status = state.reject_order(id)
+	view = "orders"
+	_show_view()
+
+
+func _call_stage(stage: String) -> String:
+	match stage:
+		"offer":
+			return "Calling"
+		"proposal":
+			return "On the call"
+		"doing":
+			return "At the desk"
+		"almost":
+			return "Ready to send"
+		"quality":
+			return "Not happy"
+		_:
+			return stage.capitalize()
+
+
 func _show_market() -> void:
 	if chosen_employee != "" and (not state.people.has(chosen_employee) or not state.person(chosen_employee).hired):
 		chosen_employee = ""
-	_card(SEA, ["Inventory", "Parts", "Qty %d" % state.stock, "One part fills one product"])
+	_card(SEA, ["Outbox", "Ready stock", "Qty %d" % state.stock, "Sits on the counter"])
 	_card(GOLD, ["Order", "Product", "Qty needed", "Pays up to"])
 	var any_order := false
 	for deal in state.open_deals():
