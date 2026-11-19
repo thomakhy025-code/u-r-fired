@@ -199,9 +199,9 @@ func _add(p: Person) -> void:
 
 func hired_people() -> Array:
 	var found: Array = []
-	for id in ["mina", "june", "otto", "ben"]:
+	for id in people.keys():
 		var p: Person = people[id]
-		if p.hired and p.active:
+		if p.role == "employee" and p.hired and p.active:
 			found.append(p)
 	return found
 
@@ -761,6 +761,48 @@ func _close_offer(p: Person, offer: int, kind: String, love: int) -> String:
 	return "%s accepted %d a unit with love %d. Assign someone to follow the deal." % [p.display_name, offer, p.love]
 
 
+func order_ceiling(customer: Person) -> int:
+	var factor := 0.7 + 0.1 * float(clampi(customer.love, 0, 5))
+	return maxi(1, int(round(float(customer.ask) * factor)))
+
+
+func sell_to_order(deal_id: String, unit_price: int) -> String:
+	var deal := _deal_by_id(deal_id)
+	if deal.is_empty() or str(deal["kind"]) != "customer":
+		return "That order is not on the desk."
+	var stage := str(deal["stage"])
+	if stage == "closed" or stage == "quality":
+		return "That order is not open for a sale."
+	if hired_people().is_empty():
+		return "Hire someone before you sell an order."
+	if unit_price <= 0:
+		return "Set a price above zero."
+	var buyer: Person = person(str(deal["partner_id"]))
+	var units := int(deal["units"])
+	var ceiling := order_ceiling(buyer)
+	var goods := buyer.goods if buyer.goods != "" else "units"
+	if unit_price > ceiling:
+		return "%s will pay up to %d for each %s. %d is above that." % [buyer.display_name, ceiling, goods, unit_price]
+	var already := bool(deal.get("reserved", false))
+	if not already and stock < units:
+		return "Inventory has %d. This order needs %d %s." % [stock, units, goods]
+	if not already:
+		stock -= units
+	var revenue := unit_price * units
+	cash += revenue
+	week_revenue += revenue
+	lifetime_profit += revenue
+	deal["stage"] = "closed"
+	deal["crew"] = []
+	deal["pay"] = revenue
+	var listed := buyer.ask
+	buyer.ask += 6 if unit_price >= listed else 2
+	if unit_price <= listed:
+		shift_love(buyer, 1, "they took the goods at the offered price")
+	_push_mail("Sale", "%s accepted %d each and paid %d for %d %s. Inventory is now %d. They may return at a higher price." % [buyer.display_name, unit_price, revenue, units, goods, stock], "order")
+	return "%s accepted %d. Paid %d. Inventory %d." % [buyer.display_name, unit_price, revenue, stock]
+
+
 func accept_order(deal_id: String) -> String:
 	var deal := _deal_by_id(deal_id)
 	if deal.is_empty() or str(deal["stage"]) != "offer":
@@ -844,7 +886,7 @@ func _open_order(customer: Person) -> void:
 	if customer.has_strength("steady_orders"):
 		units = 22 + customer.love * 4
 	_make_deal("customer", customer.id, units, customer.ask, units >= 40, "offer")
-	_push_mail("Order", "%s wants %d %s at %d each. %s Accept it, or reject it. If you accept, find a supplier while the order is open. You pay the supplier when the parts arrive, and you are paid when the customer takes the goods." % [customer.display_name, units, customer.goods, customer.ask, customer.recipe], "order")
+	_push_mail("Order", "%s wants %d %s at %d each. %s Accept it, or reject it. On Market you can sell the parts straight into this order when your price is one they will pay." % [customer.display_name, units, customer.goods, customer.ask, customer.recipe], "order")
 
 
 func _free_seat() -> int:

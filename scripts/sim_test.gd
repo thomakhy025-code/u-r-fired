@@ -12,6 +12,7 @@ func _init() -> void:
 	_check_habit_ignores_love()
 	_check_offers()
 	_check_deals_and_reports()
+	_check_direct_sale()
 	_check_training_abandons_deal()
 	_check_wage_floor()
 	_check_cast_and_government()
@@ -167,6 +168,38 @@ func _check_deals_and_reports() -> void:
 		if str(item["id"]) == deal_id:
 			closed = str(item["stage"]) == "closed"
 	_ok(closed, "three stages close the deal")
+
+
+func _check_direct_sale() -> void:
+	var game := _fresh()
+	game.recruit_offer("mina", 480)
+	var deal := _deal_for(game, "auntie")
+	var units := int(deal["units"])
+	var price := int(deal["unit_price"])
+	var before: int = game.cash
+	var ceiling := game.order_ceiling(game.person("auntie"))
+	var high: String = game.sell_to_order(str(deal["id"]), ceiling + 5)
+	_ok(high.contains("pay up to") and str(deal["stage"]) == "offer", "a high price stays on the order")
+	game.stock = units - 1
+	var short: String = game.sell_to_order(str(deal["id"]), price)
+	_ok(short.contains("Inventory") and game.stock == units - 1, "a short inventory does not sell")
+	game.stock = units
+	var sold: String = game.sell_to_order(str(deal["id"]), price)
+	_ok(str(deal["stage"]) == "closed" and game.stock == 0 and game.cash == before + units * price, "an accepted price sells the inventory")
+	_ok(sold.contains("accepted"), "the order accepted the price")
+	var packed := _fresh()
+	packed.recruit_offer("mina", 480)
+	var open_deal := _deal_for(packed, "auntie")
+	var packed_units := int(open_deal["units"])
+	open_deal["reserved"] = true
+	open_deal["stage"] = "doing"
+	packed.stock = 3
+	var cash_before: int = packed.cash
+	var from_pack: String = packed.sell_to_order(str(open_deal["id"]), int(open_deal["unit_price"]))
+	_ok(packed.stock == 3 and packed.cash == cash_before + packed_units * int(open_deal["unit_price"]) and from_pack.contains("accepted"), "packed parts are not taken twice")
+	game.visible_applicants.append("rosa")
+	game.recruit_offer("rosa", 440)
+	_ok(game.person("rosa").hired and game.hired_people().size() == 2, "a later hire can be chosen")
 
 
 func _check_training_abandons_deal() -> void:

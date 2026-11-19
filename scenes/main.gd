@@ -31,6 +31,7 @@ var pending_hire_pay := 0
 var rank_rows: Array = []
 var market_rows: Array = []
 var paid_sales := {}
+var chosen_employee := ""
 
 
 func _ready() -> void:
@@ -420,8 +421,7 @@ func _deal_block(deal: Dictionary) -> void:
 		_add_button("Reject order", func() -> void:
 			_note(func() -> String: return state.reject_order(offer_id))
 		)
-		return
-	if str(deal["stage"]) == "quality":
+	elif str(deal["stage"]) == "quality":
 		var quality_id := str(deal["id"])
 		_add_button("Give the money back", func() -> void:
 			_note(func() -> String: return state.answer_quality(quality_id, true))
@@ -430,14 +430,16 @@ func _deal_block(deal: Dictionary) -> void:
 			_note(func() -> String: return state.answer_quality(quality_id, false))
 		)
 		return
-	_card(GOLD, ["Made by", partner.recipe if partner.recipe != "" else "Staff follow the deal.", "Following: " + crew_text, partner.habit_line()])
-	for hired in state.hired_people():
-		var deal_id := str(deal["id"])
-		var employee_id: String = str(hired.id)
-		var on_deal: bool = (deal["crew"] as Array).has(employee_id)
-		var verb := ("Take %s off" % hired.display_name) if on_deal else ("Assign %s" % hired.display_name)
-		_bind_assign(employee_id, deal_id, on_deal, verb)
-
+	else:
+		_card(GOLD, ["Made by", partner.recipe if partner.recipe != "" else "Staff follow the deal.", "Following: " + crew_text, partner.habit_line()])
+		for hired in state.hired_people():
+			var deal_id := str(deal["id"])
+			var employee_id: String = str(hired.id)
+			var on_deal: bool = (deal["crew"] as Array).has(employee_id)
+			var verb := ("Take %s off" % hired.display_name) if on_deal else ("Assign %s" % hired.display_name)
+			_bind_assign(employee_id, deal_id, on_deal, verb)
+	if str(deal["kind"]) == "customer":
+		_sell_into_order(deal)
 
 func _show_suppliers() -> void:
 	if state.cooperate_from != "":
@@ -523,9 +525,11 @@ func _show_person(id: String) -> void:
 			return text
 		)
 	)
-	var sale_price := _add_spin(p.pay * 4, 100, 20000)
-	_add_button("List them on the market", func() -> void:
-		cloud.list_sale(who, p.display_name, p.gift_line(), int(sale_price.value))
+	_add_button("Choose them to sell", func() -> void:
+		chosen_employee = who
+		view = "market"
+		cloud.load_market()
+		_show_view()
 	)
 	_card(CLAY, ["Deals they can follow", "Assign them from a row below.", "", ""])
 	var any := false
@@ -594,7 +598,8 @@ func _build_gate() -> void:
 		"2. Hire someone on Recruit. There are four chairs. Signed in, the person you hire cannot be hired by another player.",
 		"3. An order arrives. Accept it, or reject it. Accept, and they may come back at a higher price. Reject, and they may not return.",
 		"4. While the order is open, find a supplier. You pay cash when the parts arrive. Packing starts once those parts are in the office.",
-		"5. You are paid when the customer takes the goods. If they dislike the quality, choose a refund or a discount.",
+		"5. You are paid when the customer takes the goods. On Market, sell parts straight into an order when your price is one they will pay. Inventory quantity is the Qty column.",
+		"6. If they dislike the quality, choose a refund or a discount. Choose an employee on Market to sell them to another company.",
 		"Love is a number out of 5. It changes how much and how fast the work goes. It does not stop a bad habit.",
 	]:
 		var step := Label.new()
@@ -756,12 +761,47 @@ func _show_rank() -> void:
 
 
 func _show_market() -> void:
+	if chosen_employee != "" and (not state.people.has(chosen_employee) or not state.person(chosen_employee).hired):
+		chosen_employee = ""
+	_card(SEA, ["Inventory", "Parts", "Qty %d" % state.stock, "One part fills one product"])
+	_card(GOLD, ["Order", "Product", "Qty needed", "Pays up to"])
+	var any_order := false
+	for deal in state.open_deals():
+		if str(deal["kind"]) != "customer" or str(deal["stage"]) == "quality":
+			continue
+		any_order = true
+		var buyer: GameState.Person = state.person(str(deal["partner_id"]))
+		_card(CLAY, [
+			buyer.display_name,
+			buyer.goods,
+			"Qty %d" % int(deal["units"]),
+			"Pays up to %d" % state.order_ceiling(buyer),
+		], buyer.id)
+		_sell_into_order(deal)
+	if not any_order:
+		_card(CLAY, ["Orders", "None are open.", "Hire someone and an order arrives.", "Inventory Qty %d" % state.stock])
+	_card(PLUM, ["Employee", "Ability", "Love", "Choose to sell"])
+	if state.hired_people().is_empty():
+		_card(PLUM, ["Employees", "Nobody is hired.", "Hire on Recruit, then choose them here.", ""])
+	for person in state.hired_people():
+		var picked: bool = chosen_employee == person.id
+		_card(PLUM, [
+			person.display_name,
+			person.gift_line(),
+			"Love %s" % state.hearts(person.love),
+			"Chosen" if picked else "On the desk",
+		], person.id)
+		_bind_choose_employee(person.id, person.display_name, picked)
+		if picked:
+			var asking := maxi(person.pay * 4, 100)
+			var price_box := _add_spin(asking, 100, 20000)
+			_bind_list_employee(person.id, price_box)
 	if not cloud.signed_in:
-		_card(PLUM, ["Market", "Sign in with Google to sell or take a person.", "Guests keep their own staff.", ""])
+		_card(GOLD, ["Other companies", "Sign in with Google to buy or receive a person.", "A guest can still sell parts into an order.", ""])
 		return
-	_card(PLUM, ["For sale", "Ability", "Price", "Agree"])
+	_card(SAGE, ["For sale", "Ability", "Price", "Agree"])
 	if market_rows.is_empty():
-		_card(SEA, ["Market", "Nobody is listed.", "Open a person and list them.", ""])
+		_card(SEA, ["Other companies", "Nobody is listed.", "Choose one of your employees and set a price.", ""])
 	for row in market_rows:
 		_card(PLUM, [
 			str(row.get("name", "")),
@@ -770,6 +810,31 @@ func _show_market() -> void:
 			"Love travels with them",
 		], str(row.get("person", "")))
 		_bind_agree(str(row.get("id", "")), int(row.get("price", 0)))
+
+
+func _sell_into_order(deal: Dictionary) -> void:
+	var deal_id := str(deal["id"])
+	var buyer: GameState.Person = state.person(str(deal["partner_id"]))
+	var ceiling := state.order_ceiling(buyer)
+	var price_box := _add_spin(buyer.ask, 1, maxi(ceiling * 2, buyer.ask + 1))
+	_add_button("Sell Qty %d at this price" % int(deal["units"]), func() -> void:
+		_note(func() -> String: return state.sell_to_order(deal_id, int(price_box.value)))
+	)
+
+
+func _bind_choose_employee(person_id: String, person_name: String, picked: bool) -> void:
+	var label := "Chosen" if picked else "Choose %s" % person_name
+	_add_button(label, func() -> void:
+		chosen_employee = "" if picked else person_id
+		_show_view()
+	)
+
+
+func _bind_list_employee(person_id: String, price_box: SpinBox) -> void:
+	var person := state.person(person_id)
+	_add_button("Sell %s to another company" % person.display_name, func() -> void:
+		cloud.list_sale(person_id, person.display_name, person.gift_line(), int(price_box.value))
+	)
 
 
 func _bind_agree(listing_id: String, price: int) -> void:
