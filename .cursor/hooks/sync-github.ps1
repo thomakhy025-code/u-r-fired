@@ -53,7 +53,8 @@ function Invoke-Git {
     if ($null -eq $output) {
         $text = ""
     } else {
-        $text = (@($output | ForEach-Object { "$_" }) -join "`n").Trim()
+        $text = (@($output | ForEach-Object { "$_" }) -join "`n")
+        $text = $text.TrimEnd([char]10, [char]13)
     }
     return @{ Code = $code; Text = $text }
 }
@@ -91,7 +92,9 @@ function Test-SecretContent([string]$fullPath) {
     }
     $text = [System.Text.Encoding]::UTF8.GetString($bytes)
     if ($text -match "-----BEGIN [A-Z ]*PRIVATE KEY-----") { return $true }
-    if ($text -match "(?i)\b(ghp_|gho_|github_pat_|glpat-|xox[baprs]-|AKIA[0-9A-Z]{16})") { return $true }
+    if ($text -match "(?i)(ghp_|gho_|github_pat_|glpat-)[A-Za-z0-9_]{8,}") { return $true }
+    if ($text -match "xox[baprs]-[A-Za-z0-9-]{8,}") { return $true }
+    if ($text -match "\bAKIA[0-9A-Z]{16}\b") { return $true }
     return $false
 }
 
@@ -103,13 +106,12 @@ function Get-RepoChanges {
     }
     foreach ($rawLine in ($status.Text -split "`n")) {
         $line = $rawLine.TrimEnd("`r")
-        if ([string]::IsNullOrWhiteSpace($line) -or $line.Length -lt 4) { continue }
-        $code = $line.Substring(0, 2)
-        $rest = $line.Substring(3)
-        $path = $rest
+        if ($line -notmatch '^([ MADRCUT?!]{2}) (.+)$') { continue }
+        $code = $Matches[1]
+        $path = $Matches[2]
         if ($code.Contains("R") -or $code.Contains("C")) {
-            $arrow = $rest.LastIndexOf(" -> ")
-            if ($arrow -ge 0) { $path = $rest.Substring($arrow + 4) }
+            $arrow = $path.LastIndexOf(" -> ")
+            if ($arrow -ge 0) { $path = $path.Substring($arrow + 4) }
         }
         $items += [pscustomobject]@{
             Code = $code
