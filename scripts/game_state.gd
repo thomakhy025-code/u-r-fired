@@ -1,612 +1,480 @@
 class_name GameState
 extends RefCounted
 
-## Real-time office. Desks make products, the outbox holds them, callers buy them.
+## Real-time office. Customers call for chairs and mobile phones.
+## Employees take the call, the bench crafts from supplier materials, and love falls while a caller waits.
 
-const PRODUCT_ORDER: Array[String] = ["snack", "lunch", "sample", "classkit", "hamper"]
-const SUPPLY_ORDER: Array[String] = ["sheets", "clips", "paper", "ink", "board", "cloth"]
+const MATERIAL_ORDER: Array[String] = ["wood", "plastic", "glass"]
 const CALLER_NAMES: Array[String] = ["Nia Cole", "Ellis Park", "Remy Cho", "Jordan Hale", "Sable Quinn"]
 const CALLER_FACES: Array[String] = ["nia", "ellis", "remy", "jordan", "sable"]
-const UPGRADE_ORDER: Array[String] = ["faster", "outbox", "phone", "shelf"]
-const RESTOCK_COST := 22
-const RESTOCK_SECONDS := 4.0
-const RESTOCK_AMOUNT := 3
-const STAFF_MAX := 5
+const PACK_QTY: int = 2
+const LOVE_MAX: int = 5
+const LOVE_PER_SECOND: float = 0.2
+const SKILL_MAX: int = 5
+const START_CASH: int = 40
 
-var rng := RandomNumberGenerator.new()
-var company_name := "Company"
-var cash := 48
-var supplies: Dictionary = {}
-var desks: Array[Desk] = []
-var outbox: Array[String] = []
-var callers: Array[Caller] = []
-var staff: Array[Staff] = []
-var messes: Array[Mess] = []
-var outbox_slots := 2
-var phone_lines := 1
-var shelf_size := 8
-var desk_rank := 0
-var restock_left := 0.0
-var spawn_wait := 9.0
-var mess_wait := 14.0
-var allow_tips := true
-var ambient := true
-var notice := ""
-var last_mood := ""
-var mood_left := 0.0
-var next_caller := 0
+var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+var company_name: String = "Company"
+var cash: int = START_CASH
+var skill: int = 1
+var materials: Dictionary[String, int] = {}
+var goods: Dictionary[String, int] = {}
+var employees: Array[Employee] = []
+var caller: Caller = null
+var craft: CraftJob = null
+var notice: String = ""
+var ambient: bool = true
+var spawn_wait: float = 1.2
+var calls_made: int = 0
+var next_caller: int = 0
 
 
 func _init(seed_value: int = 1) -> void:
 	rng.seed = seed_value
 
 
-class Desk:
-	var product_id := ""
-	var seconds_left := 0.0
-	var seconds_full := 0.0
-	var phase := "idle"
+class Employee:
+	var id: String = ""
+	var display_name: String = ""
+	var role: String = ""
+	var level: int = 1
+	var face_id: String = ""
+	var commission: int = 0
+	var calls_closed: int = 0
+	var busy: bool = false
 
 
 class Caller:
-	var display_name := ""
-	var face_id := ""
-	var product_id := ""
-	var patience := 0.0
-	var patience_full := 0.0
-	var pay := 0
+	var display_name: String = ""
+	var face_id: String = ""
+	var product_id: String = ""
+	var qty: int = 1
+	var love: float = 5.0
+	var pay: int = 0
+	var phase: String = "waiting"
+	var employee_id: String = ""
+	var seconds_left: float = 0.0
+	var seconds_full: float = 0.0
 
 
-class Staff:
-	var id := ""
-	var display_name := ""
-	var role := ""
-	var level := 1
-	var hired := false
-	var hire_cost := 30
-
-
-class Mess:
-	var kind := "papers"
-	var coins := 4
+class CraftJob:
+	var product_id: String = ""
+	var seconds_left: float = 0.0
+	var seconds_full: float = 0.0
 
 
 func setup_new_game() -> void:
-	cash = 48
+	cash = START_CASH
+	skill = 1
 	company_name = "Company"
-	outbox_slots = 2
-	phone_lines = 1
-	shelf_size = 8
-	desk_rank = 0
-	restock_left = 0.0
-	spawn_wait = 9.0
-	mess_wait = 14.0
-	allow_tips = true
+	notice = "The phone will ring."
 	ambient = true
-	notice = ""
-	last_mood = ""
-	mood_left = 0.0
+	spawn_wait = 1.2
+	calls_made = 0
 	next_caller = 0
-	supplies = {
-		"sheets": 4,
-		"clips": 4,
-		"paper": 3,
-		"ink": 3,
-		"board": 2,
-		"cloth": 2,
-	}
-	desks.clear()
-	desks.append(Desk.new())
-	desks.append(Desk.new())
-	outbox.clear()
-	callers.clear()
-	messes.clear()
-	staff.clear()
-	_add_staff("mina", "Mina Pell", "PACK", 34)
-	_add_staff("june", "June Orr", "DESK", 44)
-	_add_staff("otto", "Otto Lang", "RUSH", 30)
-	_add_staff("rosa", "Rosa Kim", "LINE", 38)
+	caller = null
+	craft = null
+	materials.clear()
+	materials["wood"] = 0
+	materials["plastic"] = 0
+	materials["glass"] = 0
+	goods.clear()
+	goods["chair"] = 0
+	goods["phone"] = 0
+	employees.clear()
+	_add_employee("mina", "Mina Pell", "Calls", 1)
+	_add_employee("june", "June Orr", "Floor", 2)
+	_add_employee("otto", "Otto Lang", "Bench", 3)
+	_add_employee("rosa", "Rosa Kim", "Desk", 4)
 
 
-func _add_staff(id: String, display_name: String, role: String, hire_cost: int) -> void:
-	var person := Staff.new()
+func _add_employee(id: String, display_name: String, role: String, level: int) -> void:
+	var person := Employee.new()
 	person.id = id
 	person.display_name = display_name
 	person.role = role
-	person.hire_cost = hire_cost
-	staff.append(person)
+	person.level = level
+	person.face_id = id
+	employees.append(person)
 
 
-func supply_name(supply_id: String) -> String:
-	match supply_id:
-		"sheets":
-			return "Card sheets"
-		"clips":
-			return "Clips"
-		"paper":
-			return "Paper rolls"
-		"ink":
-			return "Ink"
-		"board":
-			return "Board"
-		"cloth":
-			return "Cloth"
+func find_employee(employee_id: String) -> Employee:
+	var index: int = 0
+	while index < employees.size():
+		var person: Employee = employees[index]
+		if person.id == employee_id:
+			return person
+		index += 1
+	return null
+
+
+func material_name(material_id: String) -> String:
+	match material_id:
+		"wood":
+			return "Wood"
+		"plastic":
+			return "Plastic"
+		"glass":
+			return "Glass"
 		_:
-			return supply_id
+			return material_id
 
 
-func supply_qty(supply_id: String) -> int:
-	return int(supplies.get(supply_id, 0))
+func material_qty(material_id: String) -> int:
+	if not materials.has(material_id):
+		return 0
+	return int(materials[material_id])
+
+
+func goods_qty(product_id: String) -> int:
+	if not goods.has(product_id):
+		return 0
+	return int(goods[product_id])
 
 
 func product_name(product_id: String) -> String:
 	match product_id:
-		"snack":
-			return "Snack Boxes"
-		"lunch":
-			return "Lunch Packs"
-		"sample":
-			return "Sample Kits"
-		"classkit":
-			return "Class Kits"
-		"hamper":
-			return "Gift Hampers"
+		"chair":
+			return "chair"
+		"phone":
+			return "mobile phone"
 		_:
 			return product_id
 
 
-func product_cost(product_id: String) -> int:
+func product_label(product_id: String) -> String:
 	match product_id:
-		"snack":
-			return 6
-		"lunch":
+		"chair":
+			return "Chair"
+		"phone":
+			return "Phone"
+		_:
+			return "Order"
+
+
+func product_phrase(product_id: String, qty: int) -> String:
+	var name := product_name(product_id)
+	if qty == 1:
+		return "1 %s" % name
+	return "%d %ss" % [qty, name]
+
+
+func unit_pay(product_id: String) -> int:
+	match product_id:
+		"chair":
+			return 16
+		"phone":
+			return 24
+		_:
+			return 0
+
+
+func pack_cost(material_id: String) -> int:
+	match material_id:
+		"wood":
 			return 8
-		"sample":
+		"plastic":
+			return 8
+		"glass":
 			return 10
-		"classkit":
-			return 14
-		"hamper":
-			return 18
 		_:
 			return 0
 
 
-func product_seconds(product_id: String) -> float:
-	match product_id:
-		"snack":
-			return 6.0
-		"lunch":
-			return 8.0
-		"sample":
-			return 9.0
-		"classkit":
-			return 11.0
-		"hamper":
-			return 13.0
-		_:
-			return 6.0
-
-
-func product_pay(product_id: String) -> int:
-	match product_id:
-		"snack":
-			return 18
-		"lunch":
-			return 26
-		"sample":
-			return 34
-		"classkit":
-			return 44
-		"hamper":
-			return 58
-		_:
-			return 0
-
-
-func product_patience(product_id: String) -> float:
-	match product_id:
-		"snack":
-			return 22.0
-		"lunch":
-			return 18.0
-		"sample":
-			return 15.0
-		"classkit":
-			return 12.0
-		"hamper":
-			return 9.0
-		_:
-			return 22.0
-
-
-func need_count(product_id: String, supply_id: String) -> int:
-	match product_id:
-		"snack":
-			if supply_id == "sheets" or supply_id == "clips":
-				return 1
-		"lunch":
-			if supply_id == "paper" or supply_id == "ink":
-				return 1
-		"sample":
-			if supply_id == "sheets" or supply_id == "ink":
-				return 1
-		"classkit":
-			if supply_id == "board" or supply_id == "clips":
-				return 1
-		"hamper":
-			if supply_id == "board" or supply_id == "cloth":
-				return 1
+func recipe_count(product_id: String, material_id: String) -> int:
+	if product_id == "chair" and (material_id == "wood" or material_id == "plastic"):
+		return 1
+	if product_id == "phone" and (material_id == "plastic" or material_id == "glass"):
+		return 1
 	return 0
 
 
-func speed_factor() -> float:
-	var factor := 1.0
-	var rank := 0
-	while rank < desk_rank:
-		factor *= 0.82
-		rank += 1
-	for person in staff:
-		if person.hired:
-			factor *= 1.0 - 0.06 * float(person.level)
-	if factor < 0.35:
-		return 0.35
-	return factor
-
-
-func job_seconds(product_id: String) -> float:
-	var seconds := product_seconds(product_id) * speed_factor()
-	if seconds < 1.0:
-		return 1.0
+func craft_seconds() -> float:
+	var seconds := 4.0
+	var level := 1
+	while level < skill:
+		seconds *= 0.75
+		level += 1
+	if seconds < 1.25:
+		return 1.25
 	return seconds
+
+
+func research_cost() -> int:
+	return 14 + skill * 6
+
+
+func answer_seconds(product_id: String, qty: int) -> float:
+	var seconds := 3.0
+	var extra := qty - 1
+	if extra > 0:
+		seconds += float(extra) * 1.5
+	if product_id == "phone":
+		seconds += 0.6
+	return seconds
+
+
+func starting_love(qty: int) -> float:
+	if qty >= 2:
+		return 4.0
+	return 5.0
+
+
+func love_points(love: float) -> int:
+	if love >= float(LOVE_MAX):
+		return LOVE_MAX
+	if love <= 0.0:
+		return 0
+	var points := int(ceil(love))
+	if points > LOVE_MAX:
+		return LOVE_MAX
+	if points < 0:
+		return 0
+	return points
+
+
+func love_text(love: float) -> String:
+	return "%d/%d" % [love_points(love), LOVE_MAX]
 
 
 func clock_text(seconds: float) -> String:
 	var whole := maxi(int(ceil(seconds)), 0)
-	if whole >= 60:
-		return "%d:%02d" % [int(whole / 60), whole % 60]
 	return "%ds" % whole
 
 
-func start_job(desk_index: int, product_id: String) -> String:
-	if desk_index < 0 or desk_index >= desks.size():
-		return "That desk is missing."
-	if not PRODUCT_ORDER.has(product_id):
-		return "Pick a job from the desk."
-	var desk := desks[desk_index]
-	if desk.phase != "idle":
-		return "That desk is busy."
-	var cost := product_cost(product_id)
+func commission_for(pay: int) -> int:
+	var cut := int(pay / 4)
+	if cut < 1 and pay > 0:
+		return 1
+	if cut > pay:
+		return pay
+	return cut
+
+
+func buy_material(material_id: String) -> String:
+	var cost := pack_cost(material_id)
+	if cost <= 0:
+		return "Pick wood, plastic, or glass."
 	if cash < cost:
 		return "Need %d cash." % cost
-	var missing := ""
-	for supply_id in SUPPLY_ORDER:
-		var count := need_count(product_id, supply_id)
-		if count > supply_qty(supply_id):
-			missing = supply_name(supply_id)
-			break
-	if missing != "":
-		return "Need %s." % missing
 	cash -= cost
-	for supply_id in SUPPLY_ORDER:
-		var count := need_count(product_id, supply_id)
-		if count > 0:
-			supplies[supply_id] = supply_qty(supply_id) - count
-	var seconds := job_seconds(product_id)
-	desk.product_id = product_id
-	desk.seconds_left = seconds
-	desk.seconds_full = seconds
-	desk.phase = "cooking"
-	return "Started %s." % product_name(product_id)
+	var next := material_qty(material_id) + PACK_QTY
+	materials[material_id] = next
+	return "Bought %d %s." % [PACK_QTY, material_id]
 
 
-func place_on_outbox(desk_index: int) -> String:
-	if desk_index < 0 or desk_index >= desks.size():
-		return "That desk is missing."
-	var desk := desks[desk_index]
-	if desk.phase != "done":
-		return "That desk is still working."
-	if outbox.size() >= outbox_slots:
-		return "The outbox is full."
-	var product_id := desk.product_id
-	outbox.append(product_id)
-	desk.product_id = ""
-	desk.seconds_left = 0.0
-	desk.seconds_full = 0.0
-	desk.phase = "idle"
-	return "%s is on the outbox." % product_name(product_id)
+func start_craft(product_id: String) -> String:
+	if product_id != "chair" and product_id != "phone":
+		return "Pick a chair or a phone."
+	if craft != null:
+		return "The bench is busy."
+	var missing := _missing_material(product_id)
+	if missing != "":
+		return "Need %s." % material_name(missing)
+	var index: int = 0
+	while index < MATERIAL_ORDER.size():
+		var material_id: String = MATERIAL_ORDER[index]
+		var need := recipe_count(product_id, material_id)
+		if need > 0:
+			materials[material_id] = material_qty(material_id) - need
+		index += 1
+	var seconds := craft_seconds()
+	var job := CraftJob.new()
+	job.product_id = product_id
+	job.seconds_left = seconds
+	job.seconds_full = seconds
+	craft = job
+	return "Making a %s." % product_name(product_id)
 
 
-func spawn_caller(product_id: String) -> String:
-	if callers.size() >= phone_lines:
-		return "The lines are full."
-	if not PRODUCT_ORDER.has(product_id):
-		return "Nobody calls for that."
-	var caller := Caller.new()
+func buy_research() -> String:
+	if skill >= SKILL_MAX:
+		return "Skill is %d." % skill
+	var cost := research_cost()
+	if cash < cost:
+		return "Need %d cash." % cost
+	cash -= cost
+	skill += 1
+	return "Skill is %d." % skill
+
+
+func spawn_call(product_id: String, qty: int) -> String:
+	if caller != null:
+		return "The line is busy."
+	if product_id != "chair" and product_id != "phone":
+		return "Pick a chair or a phone."
+	var count := qty
+	if count < 1:
+		count = 1
+	if count > 3:
+		count = 3
 	var name_index := next_caller % CALLER_NAMES.size()
 	next_caller += 1
-	caller.display_name = CALLER_NAMES[name_index]
-	caller.face_id = CALLER_FACES[name_index]
-	caller.product_id = product_id
-	caller.pay = product_pay(product_id)
-	caller.patience_full = product_patience(product_id)
-	caller.patience = caller.patience_full
-	callers.append(caller)
-	notice = "%s wants %s." % [caller.display_name, product_name(product_id)]
+	var next := Caller.new()
+	next.display_name = CALLER_NAMES[name_index]
+	next.face_id = CALLER_FACES[name_index]
+	next.product_id = product_id
+	next.qty = count
+	next.love = starting_love(count)
+	next.pay = unit_pay(product_id) * count
+	next.phase = "waiting"
+	caller = next
+	notice = "%s wants %s." % [next.display_name, product_phrase(product_id, count)]
 	return notice
 
 
-func hand_over(caller_index: int) -> String:
-	if caller_index < 0 or caller_index >= callers.size():
-		return "Nobody is on the line."
-	var caller := callers[caller_index]
-	var slot := outbox.find(caller.product_id)
-	if slot < 0:
-		return "Put %s on the outbox first." % product_name(caller.product_id)
-	return _complete_handoff(caller_index, slot, true)
-
-
-func hand_outbox_slot(slot: int) -> String:
-	if slot < 0 or slot >= outbox.size():
-		return "That slot is empty."
-	if callers.is_empty():
+func assign_employee(employee_id: String) -> String:
+	var person := find_employee(employee_id)
+	if person == null:
+		return "That person is out."
+	if caller == null:
 		return "The phone is quiet."
-	var product_id := outbox[slot]
-	var match_index := -1
-	for caller_index in callers.size():
-		if callers[caller_index].product_id == product_id:
-			match_index = caller_index
-			break
-	if match_index >= 0:
-		return _complete_handoff(match_index, slot, true)
-	return _complete_handoff(0, slot, false)
-
-
-func order_restock() -> String:
-	if restock_left > 0.0:
-		return "A delivery is on the way."
-	if cash < RESTOCK_COST:
-		return "Need %d cash." % RESTOCK_COST
-	var room := false
-	for supply_id in SUPPLY_ORDER:
-		if supply_qty(supply_id) < shelf_size:
-			room = true
-			break
-	if not room:
-		return "The shelf is full."
-	cash -= RESTOCK_COST
-	restock_left = RESTOCK_SECONDS
-	return "Supplies arrive in %s." % clock_text(RESTOCK_SECONDS)
-
-
-func clean_mess(index: int) -> String:
-	if index < 0 or index >= messes.size():
-		return "That spot is clear."
-	var coins := messes[index].coins
-	messes.remove_at(index)
-	cash += coins
-	return "Cleaned up. +%d" % coins
-
-
-func hire(staff_id: String) -> String:
-	var index := _staff_index(staff_id)
-	if index < 0:
-		return "That card is missing."
-	var person := staff[index]
-	if person.hired:
-		return "%s is already here." % person.display_name
-	if cash < person.hire_cost:
-		return "Need %d cash." % person.hire_cost
-	cash -= person.hire_cost
-	person.hired = true
-	return "%s joined the office." % person.display_name
-
-
-func upgrade_staff(staff_id: String) -> String:
-	var index := _staff_index(staff_id)
-	if index < 0:
-		return "That card is missing."
-	var person := staff[index]
-	if not person.hired:
-		return "Hire %s first." % person.display_name
-	if person.level >= STAFF_MAX:
-		return "%s is at the top level." % person.display_name
-	var cost := staff_upgrade_cost(person.level)
-	if cash < cost:
-		return "Need %d cash." % cost
-	cash -= cost
-	person.level += 1
-	return "%s is level %d." % [person.display_name, person.level]
-
-
-func staff_upgrade_cost(level: int) -> int:
-	return 20 + level * 8
-
-
-func upgrade_open(upgrade_id: String) -> bool:
-	match upgrade_id:
-		"faster":
-			return desk_rank < 4
-		"outbox":
-			return outbox_slots < 4
-		"phone":
-			return phone_lines < 2
-		"shelf":
-			return shelf_size < 16
-		_:
-			return false
-
-
-func upgrade_cost(upgrade_id: String) -> int:
-	match upgrade_id:
-		"faster":
-			return 36 + desk_rank * 18
-		"outbox":
-			return 32
-		"phone":
-			return 40
-		"shelf":
-			return 28
-		_:
-			return 0
-
-
-func upgrade_title(upgrade_id: String) -> String:
-	match upgrade_id:
-		"faster":
-			return "Faster desk"
-		"outbox":
-			return "Outbox slot"
-		"phone":
-			return "Second line"
-		"shelf":
-			return "Bigger shelf"
-		_:
-			return "Upgrade"
-
-
-func upgrade_label(upgrade_id: String) -> String:
-	if upgrade_open(upgrade_id):
-		return "%s  %d" % [upgrade_title(upgrade_id), upgrade_cost(upgrade_id)]
-	match upgrade_id:
-		"faster":
-			return "Desks upgraded"
-		"outbox":
-			return "Outbox ready"
-		"phone":
-			return "Both lines open"
-		"shelf":
-			return "Shelf expanded"
-		_:
-			return "Done"
-
-
-func buy_upgrade(upgrade_id: String) -> String:
-	if not upgrade_open(upgrade_id):
-		return "That is already in the room."
-	var cost := upgrade_cost(upgrade_id)
-	if cash < cost:
-		return "Need %d cash." % cost
-	cash -= cost
-	match upgrade_id:
-		"faster":
-			desk_rank += 1
-			return "The desks are faster."
-		"outbox":
-			outbox_slots += 1
-			return "The outbox has another slot."
-		"phone":
-			phone_lines += 1
-			return "A second line is open."
-		"shelf":
-			shelf_size += 4
-			return "The supply shelf is bigger."
-		_:
-			return "That upgrade is missing."
+	if caller.phase == "talking":
+		var current := find_employee(caller.employee_id)
+		if current != null:
+			return "%s is on the phone." % current.display_name
+		return "The line is taken."
+	if person.busy:
+		return "%s is on the phone." % person.display_name
+	person.busy = true
+	caller.phase = "talking"
+	caller.employee_id = person.id
+	caller.seconds_full = answer_seconds(caller.product_id, caller.qty)
+	caller.seconds_left = caller.seconds_full
+	notice = "%s takes the call." % person.display_name
+	return notice
 
 
 func tick(delta: float) -> void:
 	if delta <= 0.0:
 		return
-	for desk in desks:
-		if desk.phase != "cooking":
-			continue
-		desk.seconds_left -= delta
-		if desk.seconds_left <= 0.0:
-			desk.seconds_left = 0.0
-			desk.phase = "done"
-	var caller_index := callers.size() - 1
-	while caller_index >= 0:
-		var caller := callers[caller_index]
-		caller.patience -= delta
-		if caller.patience <= 0.0:
-			notice = "%s hung up unhappy." % caller.display_name
-			_set_mood("unhappy")
-			callers.remove_at(caller_index)
-		caller_index -= 1
-	if restock_left > 0.0:
-		restock_left = maxf(restock_left - delta, 0.0)
-		if restock_left == 0.0:
-			_apply_restock()
-			notice = "Supplies arrived."
-	if mood_left > 0.0:
-		mood_left = maxf(mood_left - delta, 0.0)
-		if mood_left == 0.0:
-			last_mood = ""
-	if not ambient:
+	var left := delta
+	var guard := 0
+	while left > 0.00001 and guard < 16:
+		guard += 1
+		var step := _next_step(left)
+		if step <= 0.000001:
+			_resolve_timers()
+			break
+		_apply_step(step)
+		_resolve_timers()
+		left -= step
+
+
+func _next_step(left: float) -> float:
+	var step := left
+	if caller != null and caller.love > 0.0:
+		var love_time := caller.love / LOVE_PER_SECOND
+		if love_time < step:
+			step = love_time
+	if craft != null and craft.seconds_left > 0.0:
+		if craft.seconds_left < step:
+			step = craft.seconds_left
+	if caller != null and caller.phase == "talking" and caller.seconds_left > 0.0:
+		if caller.seconds_left < step:
+			step = caller.seconds_left
+	if ambient and caller == null and spawn_wait > 0.0:
+		if spawn_wait < step:
+			step = spawn_wait
+	return step
+
+
+func _apply_step(step: float) -> void:
+	if caller != null:
+		caller.love -= LOVE_PER_SECOND * step
+	if craft != null:
+		craft.seconds_left -= step
+	if caller != null and caller.phase == "talking":
+		caller.seconds_left -= step
+	if ambient and caller == null:
+		spawn_wait -= step
+
+
+func _resolve_timers() -> void:
+	if caller != null and caller.love <= 0.0001:
+		_hang_up()
+	if craft != null and craft.seconds_left <= 0.0001:
+		_finish_craft()
+	if caller != null and caller.phase == "talking" and caller.seconds_left <= 0.0001:
+		_try_close_deal()
+	if ambient and caller == null and spawn_wait <= 0.0001:
+		spawn_wait = rng.randf_range(7.0, 11.0)
+		_ambient_order()
+
+
+func _hang_up() -> void:
+	if caller == null:
 		return
-	spawn_wait -= delta
-	if spawn_wait <= 0.0:
-		spawn_wait = rng.randf_range(8.0, 13.0)
-		if callers.size() < phone_lines:
-			spawn_caller(_ambient_product())
-	mess_wait -= delta
-	if mess_wait <= 0.0:
-		mess_wait = 15.0
-		_maybe_mess()
+	var buyer := caller.display_name
+	var person := find_employee(caller.employee_id)
+	if person != null:
+		person.busy = false
+	caller = null
+	spawn_wait = 6.5
+	notice = "%s hung up." % buyer
 
 
-func _staff_index(staff_id: String) -> int:
-	for index in staff.size():
-		if staff[index].id == staff_id:
-			return index
-	return -1
-
-
-func _complete_handoff(caller_index: int, slot: int, matched: bool) -> String:
-	var caller := callers[caller_index]
-	outbox.remove_at(slot)
-	callers.remove_at(caller_index)
-	if not matched:
-		_set_mood("unhappy")
-		return "%s hung up unhappy." % caller.display_name
-	var tip := 0
-	if allow_tips and rng.randf() < 0.28:
-		tip = 5
-	cash += caller.pay + tip
-	_set_mood("happy")
-	if tip > 0:
-		return "%s paid %d and left a %d tip." % [caller.display_name, caller.pay, tip]
-	return "%s paid %d." % [caller.display_name, caller.pay]
-
-
-func _set_mood(mood: String) -> void:
-	last_mood = mood
-	mood_left = 1.8
-
-
-func _apply_restock() -> void:
-	for supply_id in SUPPLY_ORDER:
-		var next := supply_qty(supply_id) + RESTOCK_AMOUNT
-		if next > shelf_size:
-			next = shelf_size
-		supplies[supply_id] = next
-
-
-func _ambient_product() -> String:
-	if not outbox.is_empty() and rng.randf() < 0.75:
-		return outbox[rng.randi() % outbox.size()]
-	var roll := rng.randi() % 10
-	if roll < 4:
-		return "snack"
-	if roll < 7:
-		return "lunch"
-	if roll < 8:
-		return "sample"
-	if roll < 9:
-		return "classkit"
-	return "hamper"
-
-
-func _maybe_mess() -> void:
-	if messes.size() >= 3:
+func _finish_craft() -> void:
+	if craft == null:
 		return
-	if rng.randf() > 0.7:
+	var product_id := craft.product_id
+	goods[product_id] = goods_qty(product_id) + 1
+	craft = null
+	notice = "%s ready." % product_label(product_id)
+
+
+func _try_close_deal() -> void:
+	if caller == null:
 		return
-	var mess := Mess.new()
-	if rng.randf() < 0.45:
-		mess.kind = "cup"
-		mess.coins = 4
+	var person := find_employee(caller.employee_id)
+	if person != null:
+		person.busy = false
+	var product_id := caller.product_id
+	var qty := caller.qty
+	var have := goods_qty(product_id)
+	var buyer := caller.display_name
+	var pay := caller.pay
+	caller.employee_id = ""
+	caller.phase = "waiting"
+	caller.seconds_left = 0.0
+	if have < qty:
+		notice = "Need %s." % product_phrase(product_id, qty - have)
+		return
+	goods[product_id] = have - qty
+	var commission := commission_for(pay)
+	var company_gain := pay - commission
+	if person != null:
+		cash += company_gain
+		person.commission += commission
+		person.calls_closed += 1
+		notice = "%s paid %d. Company +%d after commission. %s +%d." % [buyer, pay, company_gain, person.display_name, commission]
 	else:
-		mess.kind = "papers"
-		mess.coins = 3
-	messes.append(mess)
+		cash += pay
+		notice = "%s paid %d." % [buyer, pay]
+	caller = null
+	spawn_wait = 6.5
+
+
+func _missing_material(product_id: String) -> String:
+	var index: int = 0
+	while index < MATERIAL_ORDER.size():
+		var material_id: String = MATERIAL_ORDER[index]
+		var need := recipe_count(product_id, material_id)
+		if need > material_qty(material_id):
+			return material_id
+		index += 1
+	return ""
+
+
+func _ambient_order() -> void:
+	calls_made += 1
+	if calls_made == 1:
+		spawn_call("chair", 1)
+		return
+	var product_id := "chair"
+	if calls_made % 2 == 0:
+		product_id = "phone"
+	var qty := 1
+	if calls_made % 3 == 0:
+		qty = 2
+	spawn_call(product_id, qty)

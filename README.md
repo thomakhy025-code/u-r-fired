@@ -1,8 +1,8 @@
 # U r fired
 
-Godot 4.7 project for a small real-time office.
+Godot 4.7 project for a small 3D office.
 
-Name the company, then run the room. Tap a desk to start a product, wait out the seconds, and tap the finished job onto the outbox. The phone rings with a caller who wants one product. Hand that product over before the patience bar runs out and they pay cash. Restock the shelf, wipe up papers and cups, hire a person, and buy a faster desk, another outbox slot, a second phone line, or a bigger shelf.
+Name the company, then run the room. The phone rings with a customer who wants chairs or mobile phones. Pick an employee to take the call. Buy wood, plastic, and glass from the supply shelf, and craft the order on the bench. Hand the goods over before love falls to 0. The company is paid, and that employee receives a commission. R&D spends cash to raise company skill and shorten the next craft.
 
 Open `project.godot` in Godot 4.7.2 (the standard editor, not the .NET build). The scene is `scenes/main.tscn`.
 

@@ -104,7 +104,7 @@ func _build_gate() -> void:
 	title.add_theme_color_override("font_color", INK)
 	box.add_child(title)
 	var line := Label.new()
-	line.text = "Tap a desk, fill the outbox, answer the phone."
+	line.text = "Answer the phone, craft the order, hand it over."
 	line.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	line.add_theme_font_override("font", ThemeDB.fallback_font)

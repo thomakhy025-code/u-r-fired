@@ -1,17 +1,17 @@
 extends SceneTree
 
-## Headless checks for the real-time desk, outbox, and phone loop.
+## Headless checks for calls, stock, love, crafting, and company skill.
 
-var failed := 0
+var failed: int = 0
 
 
 func _init() -> void:
-	_check_job_spends_and_reaches_outbox()
-	_check_caller_pays_only_for_the_product()
-	_check_harder_caller()
-	_check_upgrade_shortens_next_job()
-	_check_staff_shortens_desk()
-	_check_restock_arrives_later()
+	_check_call_needs_finished_goods()
+	_check_sale_moves_cash_and_commission()
+	_check_love_falls_while_waiting()
+	_check_crafting_chairs_and_phones()
+	_check_research_improves_next_craft()
+	_check_employees_start_at_different_levels()
 	if failed > 0:
 		print("FAILED %d" % failed)
 		quit(1)
@@ -32,131 +32,124 @@ func _fresh() -> GameState:
 	var game := GameState.new()
 	game.setup_new_game()
 	game.ambient = false
-	game.allow_tips = false
 	return game
 
 
-func _check_job_spends_and_reaches_outbox() -> void:
+func _check_call_needs_finished_goods() -> void:
 	var game := _fresh()
-	var sheets := game.supply_qty("sheets")
-	var clips := game.supply_qty("clips")
+	game.spawn_call("chair", 2)
+	game.goods["chair"] = 0
+	var person: GameState.Employee = game.find_employee("mina")
 	var cash_before := game.cash
-	var cost := game.product_cost("snack")
-	game.supplies["clips"] = 0
-	var blocked := game.start_job(0, "snack")
-	_ok(game.supply_qty("sheets") == sheets and game.cash == cash_before and game.desks[0].phase == "idle", "a missing supply spends nothing")
-	_ok(blocked.contains("Clips"), "the missing supply is named")
-	game.supplies["clips"] = clips
-	var started := game.start_job(0, "snack")
-	_ok(started.contains("Snack"), "the desk starts a snack box")
-	_ok(game.supply_qty("sheets") == sheets - 1, "a snack box spends a card sheet")
-	_ok(game.supply_qty("clips") == clips - 1, "a snack box spends a clip")
-	_ok(game.cash == cash_before - cost, "a snack box spends cash")
-	var board := game.supply_qty("board")
-	var cloth := game.supply_qty("cloth")
-	var after_snack := game.cash
-	game.start_job(1, "hamper")
-	_ok(game.supply_qty("board") == board - 1 and game.supply_qty("cloth") == cloth - 1, "a gift hamper spends board and cloth")
-	_ok(game.cash == after_snack - game.product_cost("hamper"), "a gift hamper spends its own cash")
-	var snack_left := game.desks[0].seconds_left
-	game.tick(snack_left)
-	_ok(game.desks[0].phase == "done", "the desk finishes the snack box")
-	_ok(game.desks[1].phase == "cooking", "the other desk keeps its own job")
-	_ok(game.outbox.is_empty(), "a finished job waits on the desk")
-	var placed := game.place_on_outbox(0)
-	_ok(game.outbox.size() == 1 and game.outbox[0] == "snack", "placing the finished job puts it in the outbox")
-	_ok(placed.contains("outbox") and game.desks[0].phase == "idle", "the desk is free after the outbox takes the job")
-	game.outbox.append("lunch")
-	game.desks[0].phase = "done"
-	game.desks[0].product_id = "sample"
-	var full := game.place_on_outbox(0)
-	_ok(game.outbox.size() == 2 and full.contains("full") and game.desks[0].phase == "done", "a full outbox keeps the finished job on the desk")
+	var took := game.assign_employee("mina")
+	_ok(person != null and person.busy and took.contains("Mina"), "Mina takes the call")
+	game.tick(0.5)
+	_ok(person.busy and game.caller != null and game.cash == cash_before, "the deal waits while Mina is on the phone")
+	_ok(game.goods_qty("chair") == 0, "chairs stay on the shelf during the call")
+	game.tick(game.answer_seconds("chair", 2))
+	_ok(game.caller != null, "the caller stays when the shelf is short")
+	_ok(person.busy == false, "Mina is free after the short call")
+	_ok(game.cash == cash_before and person.commission == 0, "a short shelf pays nothing")
+	_ok(game.goods_qty("chair") == 0, "a short call leaves the shelf unchanged")
+	_ok(game.notice.contains("chair"), "the missing chairs are named")
 
 
-func _check_caller_pays_only_for_the_product() -> void:
+func _check_sale_moves_cash_and_commission() -> void:
 	var game := _fresh()
-	game.outbox.append("snack")
-	game.spawn_caller("lunch")
+	game.spawn_call("phone", 2)
+	game.goods["phone"] = 3
+	var person: GameState.Employee = game.find_employee("otto")
+	var other: GameState.Employee = game.find_employee("mina")
 	var cash_before := game.cash
-	var missed := game.hand_over(0)
-	_ok(game.cash == cash_before and game.callers.size() == 1, "a caller pays nothing until their product is handed over")
-	_ok(missed.contains("Lunch") and game.outbox.has("snack"), "the other product stays on the outbox")
-	var wrong := game.hand_outbox_slot(0)
-	_ok(game.cash == cash_before and game.callers.is_empty() and game.outbox.is_empty(), "the wrong product pays nothing")
-	_ok(wrong.contains("unhappy"), "the wrong handoff hangs up unhappy")
-	game.outbox.append("lunch")
-	game.spawn_caller("lunch")
-	var pay := game.product_pay("lunch")
-	var paid := game.hand_over(0)
-	_ok(game.cash == cash_before + pay and paid.contains(str(pay)), "the caller pays when that product is handed over")
-	_ok(game.callers.is_empty() and not game.outbox.has("lunch"), "the handed product leaves the outbox")
-	game.spawn_caller("snack")
-	var waiting := game.callers[0].patience
-	game.tick(waiting)
-	_ok(game.callers.is_empty() and game.cash == cash_before + pay, "a caller who runs out of patience pays nothing")
+	var pay := game.caller.pay
+	var commission := game.commission_for(pay)
+	game.assign_employee("otto")
+	game.tick(game.answer_seconds("phone", 2))
+	_ok(game.caller == null, "the caller leaves when the phones are handed over")
+	_ok(game.goods_qty("phone") == 1, "the order leaves the shelf and the spare phone stays")
+	_ok(commission > 0 and commission < pay, "commission is a slice of the payment")
+	_ok(game.cash == cash_before + pay - commission, "the company receives the payment after commission")
+	_ok(person.commission == commission and person.calls_closed == 1, "Otto receives the commission")
+	_ok(other.commission == 0 and other.busy == false, "the commission stays with the employee who took the call")
+	_ok(game.notice.contains("commission") and game.notice.contains(str(pay - commission)) and game.notice.contains(str(commission)), "the payout shows company cash and commission")
+	_ok(game.notice.contains(person.display_name), "the payout names the employee")
 
 
-func _check_harder_caller() -> void:
+func _check_love_falls_while_waiting() -> void:
 	var game := _fresh()
-	_ok(game.product_patience("hamper") < game.product_patience("snack"), "a harder caller waits less")
-	_ok(game.product_pay("hamper") > game.product_pay("snack"), "a harder caller pays more")
-	game.phone_lines = 2
-	game.spawn_caller("hamper")
-	game.spawn_caller("snack")
-	_ok(game.callers[0].patience < game.callers[1].patience, "the hamper caller is given less time")
-	_ok(game.callers[0].pay > game.callers[1].pay, "the hamper caller is worth more cash")
-	game.phone_lines = 1
-	game.callers.clear()
-	game.spawn_caller("snack")
-	var blocked := game.spawn_caller("lunch")
-	_ok(game.callers.size() == 1 and blocked.contains("full"), "one phone line holds one caller")
-	game.cash = 80
-	game.buy_upgrade("phone")
-	game.spawn_caller("lunch")
-	_ok(game.phone_lines == 2 and game.callers.size() == 2, "a second line lets another caller wait")
-
-
-func _check_upgrade_shortens_next_job() -> void:
-	var game := _fresh()
-	var before := game.job_seconds("snack")
-	game.cash = 200
+	game.spawn_call("phone", 2)
+	var started := game.caller.love
+	_ok(is_equal_approx(started, 4.0) and game.love_points(started) == 4, "a larger order starts at 4 love")
+	game.spawn_call("chair", 1)
+	_ok(game.caller.product_id == "phone", "a busy line keeps the caller who is waiting")
+	game.tick(3.0)
+	_ok(game.caller != null and game.caller.love < started, "love falls while the caller waits")
+	var waited := game.caller.love
+	game.assign_employee("june")
+	game.tick(1.0)
+	_ok(game.caller != null and game.caller.phase == "talking" and game.caller.love < waited, "love falls while the employee is on the phone")
 	var cash_before := game.cash
-	var bought := game.buy_upgrade("faster")
-	_ok(game.cash < cash_before and bought.contains("faster"), "an upgrade spends cash")
-	var after := game.job_seconds("snack")
-	_ok(after < before, "an upgrade shortens the next job")
-	game.start_job(0, "snack")
-	_ok(game.desks[0].seconds_full < before and is_equal_approx(game.desks[0].seconds_full, after), "the job started after the upgrade uses the shorter time")
+	var goods := game.goods_qty("phone")
+	game.tick(40.0)
+	_ok(game.caller == null, "love at 0 hangs up")
+	_ok(game.cash == cash_before and game.goods_qty("phone") == goods, "a hang up hands over nothing")
+	var quiet := _fresh()
+	quiet.spawn_call("chair", 1)
+	_ok(is_equal_approx(quiet.caller.love, 5.0) and quiet.love_text(quiet.caller.love) == "5/5", "a small order starts at 5/5")
+	var before := quiet.caller.love
+	quiet.tick(4.0)
+	_ok(quiet.caller != null and quiet.caller.love < before, "love falls as wait time passes")
 
 
-func _check_staff_shortens_desk() -> void:
+func _check_crafting_chairs_and_phones() -> void:
 	var game := _fresh()
-	var before := game.job_seconds("snack")
-	game.cash = 300
-	var hired := game.hire("otto")
-	_ok(game.staff[game._staff_index("otto")].hired and hired.contains("Otto"), "Otto can be hired with cash")
-	var with_staff := game.job_seconds("snack")
-	_ok(with_staff < before, "a hired person shortens desk time")
 	var cash_before := game.cash
-	var raised := game.upgrade_staff("otto")
-	_ok(game.cash < cash_before and game.staff[game._staff_index("otto")].level == 2, "a card upgrade spends cash and raises the level")
-	_ok(game.job_seconds("snack") < with_staff and raised.contains("2"), "a higher card makes the next job faster")
+	var bought := game.buy_material("wood")
+	_ok(game.material_qty("wood") == GameState.PACK_QTY, "bought wood arrives in inventory")
+	_ok(game.cash == cash_before - game.pack_cost("wood") and bought.contains("wood"), "buying wood spends cash")
+	game.materials["wood"] = 2
+	game.materials["plastic"] = 0
+	game.materials["glass"] = 4
+	var wood := game.material_qty("wood")
+	var glass := game.material_qty("glass")
+	var blocked := game.start_craft("chair")
+	_ok(game.material_qty("wood") == wood and game.material_qty("glass") == glass and game.craft == null, "a missing material spends nothing")
+	_ok(blocked.contains("Plastic"), "the missing material is named")
+	game.materials["plastic"] = 2
+	var started := game.start_craft("chair")
+	_ok(started.contains("chair"), "the bench starts a chair")
+	_ok(game.material_qty("wood") == 1 and game.material_qty("plastic") == 1 and game.material_qty("glass") == glass, "a chair spends wood and plastic")
+	_ok(game.goods_qty("chair") == 0, "the chair stays unfinished while the bench works")
+	game.tick(game.craft.seconds_left)
+	_ok(game.goods_qty("chair") == 1 and game.craft == null, "the bench adds a chair")
+	var wood_left := game.material_qty("wood")
+	game.start_craft("phone")
+	_ok(game.material_qty("plastic") == 0 and game.material_qty("glass") == glass - 1 and game.material_qty("wood") == wood_left, "a phone spends plastic and glass")
+	_ok(game.goods_qty("phone") == 0 and game.goods_qty("chair") == 1, "a phone craft leaves the chair on the shelf")
+	game.tick(game.craft.seconds_full)
+	_ok(game.goods_qty("phone") == 1, "the bench adds a phone")
 
 
-func _check_restock_arrives_later() -> void:
+func _check_research_improves_next_craft() -> void:
 	var game := _fresh()
-	var sheets := game.supply_qty("sheets")
-	game.cash = 40
+	var before := game.craft_seconds()
+	game.cash = 100
 	var cash_before := game.cash
-	game.order_restock()
-	_ok(game.cash == cash_before - GameState.RESTOCK_COST, "a restock spends cash")
-	_ok(game.supply_qty("sheets") == sheets, "supplies stay put until the delivery")
-	game.tick(0.2)
-	_ok(game.supply_qty("sheets") == sheets, "the delivery is still on the way")
-	game.tick(GameState.RESTOCK_SECONDS)
-	_ok(game.supply_qty("sheets") == sheets + GameState.RESTOCK_AMOUNT, "supplies arrive after the wait")
-	var coins := game.cash
-	game.messes.append(GameState.Mess.new())
-	game.messes[0].coins = 3
-	var cleaned := game.clean_mess(0)
-	_ok(game.messes.is_empty() and game.cash == coins + 3 and cleaned.contains("3"), "cleaning a mess pays a little cash")
+	var cost := game.research_cost()
+	var bought := game.buy_research()
+	_ok(game.cash == cash_before - cost, "research spends cash")
+	_ok(game.skill == 2 and bought.contains("2"), "research raises the skill")
+	var after := game.craft_seconds()
+	_ok(after < before, "research shortens the next craft")
+	game.materials["wood"] = 1
+	game.materials["plastic"] = 1
+	var started := game.start_craft("chair")
+	_ok(game.craft != null and is_equal_approx(game.craft.seconds_full, after), "the craft started after research uses the shorter time")
+	_ok(game.craft.seconds_full < before and started.contains("chair"), "the bench starts the shorter chair craft")
+
+
+func _check_employees_start_at_different_levels() -> void:
+	var game := _fresh()
+	_ok(game.employees.size() >= 3, "the office has a staff")
+	_ok(game.employees[0].level != game.employees[1].level and game.employees[1].level != game.employees[2].level, "employees start at different levels")
+	_ok(game.employees[0].display_name != "" and game.employees[0].role != "", "employees have a name and a role")
