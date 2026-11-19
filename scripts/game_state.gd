@@ -84,6 +84,7 @@ var week_interest := 0
 var credit_buffer := 0
 var company_name := "Company"
 var stock := 0
+var inventory := {}
 var lifetime_profit := 0
 var suppress_habits := false
 var forced_habits := {}
@@ -117,6 +118,9 @@ class Person:
 	var recipe := ""
 	var returns := true
 	var made := 0
+	var level := 1
+	var call_seconds := 60
+	var needs: Dictionary = {}
 
 	func has_strength(gift: String) -> bool:
 		return strengths.has(gift)
@@ -157,6 +161,25 @@ func setup_new_game() -> void:
 	_add(_person("oak", "Oak Crates", "supplier", "mixed", ["on_time"], "snap", "minor", 3, 3, 3, 30, false, "crates", "Ships crates the boxes travel in."))
 	_add(_person("cloth", "Soft Cloth", "supplier", "great strength, minor flaw", ["on_time"], "fuss", "minor", 3, 3, 3, 26, false, "cloth", "Ships cloth for wrapping."))
 	_add(_person("glass", "Night Glass", "supplier", "thin strength, serious flaw", ["large_lots"], "junk", "serious", 2, 4, 2, 14, false, "glass sheets", "Ships glass that can arrive as junk."))
+	person("sam").level = 54
+	person("otto").level = 58
+	person("ken").level = 63
+	person("noor").level = 66
+	person("ben").level = 69
+	person("rosa").level = 71
+	person("mina").level = 74
+	person("june").level = 77
+	person("priya").level = 81
+	person("cafe").call_seconds = 90
+	person("cafe").needs = {"harbor": 1}
+	person("auntie").call_seconds = 120
+	person("auntie").needs = {"steady": 1}
+	person("influencer").call_seconds = 160
+	person("influencer").needs = {"cheap": 1}
+	person("school").call_seconds = 200
+	person("school").needs = {"steady": 1, "ink": 1}
+	person("lau").call_seconds = 240
+	person("lau").needs = {"north": 1, "cloth": 1}
 	visible_applicants = ["mina"]
 	hidden_applicants = ["otto", "june", "ben", "rosa", "ken", "priya", "sam", "noor"]
 	known_suppliers = ["steady", "cheap"]
@@ -766,6 +789,205 @@ func order_ceiling(customer: Person) -> int:
 	return maxi(1, int(round(float(customer.ask) * factor)))
 
 
+func add_ingredient(id: String, amount: int) -> void:
+	if amount == 0:
+		return
+	var have: int = int(inventory.get(id, 0))
+	inventory[id] = have + amount
+	_recount_stock()
+
+
+func ingredient_qty(id: String) -> int:
+	return int(inventory.get(id, 0))
+
+
+func _recount_stock() -> void:
+	var total := 0
+	for key in inventory.keys():
+		total += maxi(int(inventory[key]), 0)
+	stock = total
+
+
+func ingredient_need(customer: Person, units: int) -> Dictionary:
+	var need := {}
+	for key in customer.needs.keys():
+		need[str(key)] = int(customer.needs[key]) * units
+	return need
+
+
+func missing_ingredient(need: Dictionary) -> String:
+	for key in need.keys():
+		var have := ingredient_qty(str(key))
+		var want: int = int(need[key])
+		if have < want:
+			var supplier: Person = person(str(key))
+			return "Need %d %s. Inventory has %d." % [want, supplier.goods, have]
+	return ""
+
+
+func _take_ingredients(need: Dictionary) -> void:
+	for key in need.keys():
+		add_ingredient(str(key), -int(need[key]))
+
+
+func _give_ingredients(need: Dictionary) -> void:
+	for key in need.keys():
+		add_ingredient(str(key), int(need[key]))
+
+
+func call_length(customer: Person, employee: Person) -> int:
+	var factor := clampf(1.15 - float(employee.level) * 0.005, 0.72, 1.15)
+	return maxi(45, int(round(float(customer.call_seconds) * factor)))
+
+
+func clock_text(seconds: float) -> String:
+	var whole := maxi(int(ceil(seconds)), 0)
+	return "%d:%02d" % [int(whole / 60.0), whole % 60]
+
+
+func card_role(p: Person) -> String:
+	if p.strengths.is_empty():
+		return "DESK"
+	match str(p.strengths[0]):
+		"catch_junk":
+			return "QC"
+		"books":
+			return "AUD"
+		"long_hours":
+			return "OPS"
+		"temper_solver":
+			return "HR"
+		"sales":
+			return "SEL"
+		"on_time":
+			return "OPS"
+		_:
+			return "DESK"
+
+
+func card_stats(p: Person) -> Dictionary:
+	var care := 42 + int(p.level / 3.0)
+	if p.has_strength("catch_junk") or p.has_strength("books"):
+		care += 12
+	var nerve := 78 + int(p.level / 10.0)
+	match p.severity:
+		"faint":
+			nerve -= 4
+		"minor":
+			nerve -= 10
+		"moderate":
+			nerve -= 18
+		_:
+			nerve -= 28
+	var sales := 40 + int(p.level / 5.0)
+	if p.has_strength("sales"):
+		sales += 14
+	var stamina := 42 + int(p.level / 5.0)
+	if p.has_strength("long_hours"):
+		stamina += 14
+	return {
+		"PAC": clampi(p.base_pace * 14 + int(p.level / 6.0), 1, 99),
+		"OUT": clampi(p.base_workload * 14 + int(p.level / 6.0), 1, 99),
+		"CAR": clampi(care, 1, 99),
+		"NRV": clampi(nerve, 1, 99),
+		"SAL": clampi(sales, 1, 99),
+		"STA": clampi(stamina, 1, 99),
+	}
+
+
+func upgrade_cost(p: Person) -> int:
+	return 80 + p.level * 12
+
+
+func upgrade_employee(id: String) -> String:
+	if lost:
+		return loss_reason
+	var p: Person = person(id)
+	if not p.hired:
+		return "%s is not on a card in this office." % p.display_name
+	if p.level >= 89:
+		return "%s is already at 89." % p.display_name
+	var cost := upgrade_cost(p)
+	if cash < cost:
+		return "The upgrade costs %d and the cash is %d." % [cost, cash]
+	cash -= cost
+	p.level += 1
+	_push_mail("Card", "%s is now level %d. The upgrade cost %d." % [p.display_name, p.level, cost], "note")
+	return "%s is now %d." % [p.display_name, p.level]
+
+
+func free_for_call() -> Array:
+	var busy := {}
+	for deal in deals:
+		if str(deal["stage"]) != "on_call":
+			continue
+		for member_id in deal["crew"]:
+			busy[str(member_id)] = true
+	var found: Array = []
+	for p in hired_people():
+		if p.training or busy.has(p.id):
+			continue
+		found.append(p)
+	return found
+
+
+func active_call() -> Dictionary:
+	for deal in deals:
+		if str(deal["kind"]) == "customer" and str(deal["stage"]) == "on_call":
+			return deal
+	return {}
+
+
+func tick_calls(delta: float) -> String:
+	var notes: Array = []
+	for deal in deals:
+		if str(deal["stage"]) != "on_call":
+			continue
+		if _live_crew(deal).is_empty():
+			_refund_call(deal)
+			notes.append("The line dropped. The stock is back on the shelf.")
+			continue
+		deal["seconds_left"] = float(deal.get("seconds_left", 0.0)) - delta
+		if float(deal["seconds_left"]) <= 0.0:
+			notes.append(_finish_call(deal))
+	if notes.is_empty():
+		return ""
+	resolve_exits()
+	return " ".join(notes)
+
+
+func _refund_call(deal: Dictionary) -> void:
+	var held: Variant = deal.get("held", {})
+	if held is Dictionary:
+		_give_ingredients(held)
+	deal["stage"] = "offer"
+	deal["crew"] = []
+	deal["seconds_left"] = 0.0
+	deal["held"] = {}
+
+
+func _finish_call(deal: Dictionary) -> String:
+	var buyer: Person = person(str(deal["partner_id"]))
+	var crew := _live_crew(deal)
+	var speaker: Person = crew[0]
+	var units := int(deal["units"])
+	var revenue := units * int(deal["unit_price"])
+	cash += revenue
+	week_revenue += revenue
+	lifetime_profit += revenue
+	speaker.made += units
+	buyer.ask += 6
+	shift_love(buyer, 1, "the call was finished")
+	shift_love(speaker, 1, "they finished the call")
+	deal["stage"] = "closed"
+	deal["crew"] = []
+	deal["pay"] = revenue
+	deal["seconds_left"] = 0.0
+	var line := "%s finished %s in the booked time. Paid %d. %s %d. %s %d." % [speaker.display_name, buyer.goods, revenue, buyer.display_name, buyer.love, speaker.display_name, speaker.love]
+	_push_mail("Call finished", line, "report")
+	return line
+
+
 func sell_to_order(deal_id: String, unit_price: int) -> String:
 	var deal := _deal_by_id(deal_id)
 	if deal.is_empty() or str(deal["kind"]) != "customer":
@@ -783,11 +1005,16 @@ func sell_to_order(deal_id: String, unit_price: int) -> String:
 	var goods := buyer.goods if buyer.goods != "" else "units"
 	if unit_price > ceiling:
 		return "%s will pay up to %d for each %s. %d is above that." % [buyer.display_name, ceiling, goods, unit_price]
+	if stage == "on_call":
+		return "An employee is already on that call."
 	var already := bool(deal.get("reserved", false))
-	if not already and stock < units:
-		return "Inventory has %d. This order needs %d %s." % [stock, units, goods]
+	var need := ingredient_need(buyer, units)
 	if not already:
-		stock -= units
+		var gap := missing_ingredient(need)
+		if gap != "":
+			return gap
+		_take_ingredients(need)
+		deal["reserved"] = true
 	var revenue := unit_price * units
 	cash += revenue
 	week_revenue += revenue
@@ -803,16 +1030,33 @@ func sell_to_order(deal_id: String, unit_price: int) -> String:
 	return "%s accepted %d. Paid %d. Inventory %d." % [buyer.display_name, unit_price, revenue, stock]
 
 
-func accept_order(deal_id: String) -> String:
+func accept_order(deal_id: String, employee_id: String) -> String:
 	var deal := _deal_by_id(deal_id)
 	if deal.is_empty() or str(deal["stage"]) != "offer":
 		return "That order is not waiting for an answer."
-	if hired_people().is_empty():
-		return "Hire someone before you accept an order."
-	deal["stage"] = "proposal"
-	deal["reserved"] = false
+	if employee_id == "":
+		return "Choose an employee to take the call."
+	var speaker: Person = person(employee_id)
+	if not speaker.hired or speaker.training:
+		return "%s cannot take a call right now." % speaker.display_name
+	for other in deals:
+		if str(other["stage"]) == "on_call" and (other["crew"] as Array).has(employee_id):
+			return "%s is already on a call." % speaker.display_name
 	var buyer: Person = person(str(deal["partner_id"]))
-	return "Picked up %s. Assign a desk, and find a supplier if the stock is not here. If this goes well, they may call back at a higher price." % buyer.goods
+	var units := int(deal["units"])
+	var need := ingredient_need(buyer, units)
+	var gap := missing_ingredient(need)
+	if gap != "":
+		return gap
+	_take_ingredients(need)
+	var seconds := call_length(buyer, speaker)
+	deal["stage"] = "on_call"
+	deal["crew"] = [employee_id]
+	deal["reserved"] = true
+	deal["held"] = need
+	deal["seconds_left"] = float(seconds)
+	deal["seconds_full"] = float(seconds)
+	return "%s %d takes %s. The call runs %s. Stock for it is off the shelf." % [speaker.display_name, speaker.level, buyer.goods, clock_text(float(seconds))]
 
 
 func reject_order(deal_id: String) -> String:
@@ -886,7 +1130,7 @@ func _open_order(customer: Person) -> void:
 	if customer.has_strength("steady_orders"):
 		units = 22 + customer.love * 4
 	_make_deal("customer", customer.id, units, customer.ask, units >= 40, "offer")
-	_push_mail("Phone", "%s is calling for %d %s at %d each. %s Pick up the phone, or let it ring out. On Market you can send ready stock if your price is one they will pay." % [customer.display_name, units, customer.goods, customer.ask, customer.recipe], "order")
+	_push_mail("Phone", "%s is calling for %d %s at %d each. The line is booked for %s before an employee's card shortens it. Each one uses supplier stock. Choose someone to take the call." % [customer.display_name, units, customer.goods, customer.ask, clock_text(float(customer.call_seconds))], "order")
 
 
 func _free_seat() -> int:
@@ -900,7 +1144,7 @@ func _free_seat() -> int:
 
 
 func _applicant_card(p: Person) -> String:
-	return "%s. %s. Strength: %s. Bad habit: %s (%s). Ask: %d." % [p.display_name, p.balance, p.gift_line(), p.habit_line(), p.severity, p.ask]
+	return "%s. Level %d. %s. Strength: %s. Bad habit: %s (%s). Ask: %d." % [p.display_name, p.level, p.balance, p.gift_line(), p.habit_line(), p.severity, p.ask]
 
 
 func _profile(p: Person) -> String:
@@ -1080,7 +1324,9 @@ func _mail_has_title(title: String) -> bool:
 
 func _resolve_stage(deal: Dictionary) -> void:
 	var stage_now := str(deal["stage"])
-	if stage_now == "closed" or stage_now == "offer" or stage_now == "quality":
+	if stage_now == "closed" or stage_now == "offer" or stage_now == "quality" or stage_now == "on_call":
+		return
+	if str(deal["kind"]) == "customer":
 		return
 	var crew := _live_crew(deal)
 	if crew.is_empty():
@@ -1298,7 +1544,7 @@ func _settle_money(deal: Dictionary, partner: Person, total: int, on_time: bool,
 		partner.ask += 6
 		return "%s accepted the goods and paid %d. They may return at a higher price." % [partner.display_name, revenue]
 	var arrived := maxi(total, 0)
-	stock += arrived
+	add_ingredient(partner.id, arrived)
 	var cost := int(deal["units"]) * int(deal["unit_price"])
 	if cash >= cost:
 		cash -= cost

@@ -91,7 +91,7 @@ func sync_staff() -> void:
 		body.visible = true
 		_dress(body, sitting.id)
 		var label: Label3D = body.get_node("Name")
-		label.text = "%s\n%s %s" % [sitting.display_name, game.hearts(sitting.love), _mood(sitting.love)]
+		label.text = "%s %d\n%s %s" % [sitting.display_name, sitting.level, game.hearts(sitting.love), _mood(sitting.love)]
 	_sync_outbox()
 
 
@@ -151,7 +151,7 @@ func _process(delta: float) -> void:
 					working = true
 					break
 		var label: Label3D = body.get_node("Name")
-		label.text = "%s\n%s %s" % [person.display_name, game.hearts(person.love), _mood(person.love)]
+		label.text = "%s %d\n%s %s" % [person.display_name, person.level, game.hearts(person.love), _mood(person.love)]
 		if person.training:
 			book.visible = true
 			arms.rotation.x = sin(clock * 1.4) * 0.08

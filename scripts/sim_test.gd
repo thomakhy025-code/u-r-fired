@@ -146,28 +146,30 @@ func _check_deals_and_reports() -> void:
 	game.end_week()
 	_ok(not _mail_blob(game).contains("On the call."), "a deal with nobody on it waits")
 	game = _fresh()
+	_ok(game.person("mina").level == 74 and game.person("otto").level == 58 and game.person("priya").level == 81, "employees start on different cards")
+	_ok(game.person("lau").call_seconds > game.person("auntie").call_seconds and game.person("auntie").call_seconds > game.person("cafe").call_seconds, "harder customers book a longer call")
 	game.recruit_offer("mina", 480)
-	game.stock = 500
 	var deal := _deal_for(game, "auntie")
 	_ok(not deal.is_empty(), "Auntie Shop's order is on the sign")
-	game.accept_order(str(deal["id"]))
-	game.assign("mina", str(deal["id"]), true)
-	var deal_id := str(deal["id"])
-	game.end_week()
-	var blob := _mail_blob(game)
-	_ok(blob.contains("On the call."), "the first report is the proposal")
-	_ok(blob.contains("Auntie Shop") and blob.contains("Mina"), "the report names every stakeholder")
-	_ok(blob.contains("Auntie Shop ") and blob.contains("Mina "), "the report lists their love")
-	game.end_week()
-	_ok(_mail_blob(game).contains("At the desk."), "the second report is doing")
-	game.end_week()
-	var finished := _mail_blob(game)
-	_ok(finished.contains("Ready to send."), "the third report is almost finish")
-	var closed := false
-	for item in game.deals:
-		if str(item["id"]) == deal_id:
-			closed = str(item["stage"]) == "closed"
-	_ok(closed, "three stages close the deal")
+	var units := int(deal["units"])
+	var bare: String = game.accept_order(str(deal["id"]), "")
+	_ok(bare.contains("employee") and str(deal["stage"]) == "offer", "a call needs an employee")
+	var short: String = game.accept_order(str(deal["id"]), "mina")
+	_ok(short.contains("Need") and str(deal["stage"]) == "offer", "a call needs supplier inventory")
+	game.add_ingredient("steady", units)
+	var started: String = game.accept_order(str(deal["id"]), "mina")
+	_ok(str(deal["stage"]) == "on_call" and started.contains("Mina") and game.ingredient_qty("steady") == 0, "the employee takes the stock onto the call")
+	var booked := float(deal["seconds_left"])
+	_ok(booked >= 60.0 and booked < float(game.person("auntie").call_seconds), "the call shows minutes and seconds")
+	game.tick_calls(booked - 1.0)
+	_ok(str(deal["stage"]) == "on_call", "the line stays up until the clock ends")
+	var paid: String = game.tick_calls(2.0)
+	_ok(str(deal["stage"]) == "closed" and paid.contains("Auntie Shop") and paid.contains("Mina"), "the finished call names both sides")
+	_ok(paid.contains("Auntie Shop ") and paid.contains("Mina "), "the report lists their love")
+	game.cash = 5000
+	var before_level: int = game.person("mina").level
+	var raised: String = game.upgrade_employee("mina")
+	_ok(game.person("mina").level == before_level + 1 and raised.contains(str(before_level + 1)), "a card can be upgraded")
 
 
 func _check_direct_sale() -> void:
@@ -180,12 +182,12 @@ func _check_direct_sale() -> void:
 	var ceiling := game.order_ceiling(game.person("auntie"))
 	var high: String = game.sell_to_order(str(deal["id"]), ceiling + 5)
 	_ok(high.contains("pay up to") and str(deal["stage"]) == "offer", "a high price stays on the order")
-	game.stock = units - 1
+	game.add_ingredient("steady", units - 1)
 	var short: String = game.sell_to_order(str(deal["id"]), price)
-	_ok(short.contains("Inventory") and game.stock == units - 1, "a short inventory does not sell")
-	game.stock = units
+	_ok(short.contains("Inventory") and game.ingredient_qty("steady") == units - 1, "a short inventory does not sell")
+	game.add_ingredient("steady", 1)
 	var sold: String = game.sell_to_order(str(deal["id"]), price)
-	_ok(str(deal["stage"]) == "closed" and game.stock == 0 and game.cash == before + units * price, "an accepted price sells the inventory")
+	_ok(str(deal["stage"]) == "closed" and game.ingredient_qty("steady") == 0 and game.cash == before + units * price, "an accepted price sells the inventory")
 	_ok(sold.contains("accepted"), "the order accepted the price")
 	var packed := _fresh()
 	packed.recruit_offer("mina", 480)

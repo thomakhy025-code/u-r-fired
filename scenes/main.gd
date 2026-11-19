@@ -36,6 +36,8 @@ var call_card: PanelContainer
 var call_title: Label
 var call_body: Label
 var call_fill: ColorRect
+var call_answers: VBoxContainer
+var line_label: Label
 var call_id := ""
 var call_left := 0.0
 const CALL_PATIENCE := 48.0
@@ -428,14 +430,17 @@ func _deal_block(deal: Dictionary) -> void:
 	], partner.id)
 	if str(deal["stage"]) == "offer":
 		var offer_id := str(deal["id"])
-		_add_button("Pick up", func() -> void:
-			call_id = ""
-			_note(func() -> String: return state.accept_order(offer_id))
-		)
 		_add_button("Let it ring out", func() -> void:
 			call_id = ""
 			_note(func() -> String: return state.reject_order(offer_id))
 		)
+		_answer_buttons(offer_id)
+	elif str(deal["stage"]) == "on_call":
+		var speaker := "Someone"
+		for member_id in deal["crew"]:
+			speaker = state.person(str(member_id)).display_name
+		_card(GOLD, ["On the line", speaker, state.clock_text(float(deal.get("seconds_left", 0))), partner.goods])
+		return
 	elif str(deal["stage"]) == "quality":
 		var quality_id := str(deal["id"])
 		_add_button("Give the money back", func() -> void:
@@ -494,7 +499,8 @@ func _show_recruit() -> void:
 		_card(PLUM, ["Recruit", "Nobody is waiting.", "Look, or wait for mail."])
 	for id in state.visible_applicants:
 		var applicant: GameState.Person = state.person(str(id))
-		_card(PLUM, [applicant.display_name, applicant.gift_line(), applicant.habit_line(), "Ask %d    Love %s" % [applicant.ask, state.hearts(applicant.love)]], applicant.id)
+		_staff_card(applicant)
+		_card(PLUM, [applicant.gift_line(), applicant.habit_line(), "Ask %d" % applicant.ask, "Love %s" % state.hearts(applicant.love)])
 		if state.pending_think.has(applicant.id):
 			_bind_insist(applicant.id)
 		var spin := _add_spin(applicant.ask, 10, 2000)
@@ -520,12 +526,18 @@ func _show_person(id: String) -> void:
 	if not p.hired:
 		_add_label("That chair is empty.")
 		return
-	_card(PLUM, [p.display_name, p.balance, "Love %s" % state.hearts(p.love), "Pay %d" % p.pay], p.id)
+	var who: String = p.id
+	_staff_card(p)
+	_card(PLUM, [p.display_name, "Level %d" % p.level, "Love %s" % state.hearts(p.love), "Pay %d" % p.pay], p.id)
+	if p.level < 89:
+		var cost := state.upgrade_cost(p)
+		_add_button("Upgrade the card to %d for %d" % [p.level + 1, cost], func() -> void:
+			_note(func() -> String: return state.upgrade_employee(who))
+		)
 	_card(SAGE, [p.gift_line(), p.habit_line(), "Workload %d" % p.base_workload, "Pace %d" % p.base_pace])
 	if p.training:
 		_card(GOLD, ["Training", "No deal work this period.", "The salary is still paid.", ""])
 	var spin := _add_spin(p.pay, state.min_wage, 3000)
-	var who: String = p.id
 	_add_button("Set pay", func() -> void:
 		_note(func() -> String: return state.set_wage(who, int(spin.value)))
 	)
@@ -611,10 +623,10 @@ func _build_gate() -> void:
 	for line in [
 		"1. Name the company. You are the director. You do not walk. You press the shelf.",
 		"2. Hire someone on Recruit. There are four chairs. Signed in, the person you hire cannot be hired by another player.",
-		"3. The phone rings. Pick it up, or let it ring out. Pick up, and they may call back at a higher price. Let it ring out, and they may not call again.",
-		"4. While the call is open, find a supplier. You pay cash when the supplies arrive. A desk starts once those supplies are in the office.",
+		"3. The phone rings. Choose an employee to take the call. Harder customers keep them on the line for more minutes and seconds. Let it ring out, and they may not call again.",
+		"4. Each product spends inventory from a supplier. You pay the supplier when that stock arrives. A higher card finishes the call a little sooner.",
 		"5. You are paid when the caller takes the goods. On Market, the Ready column is the outbox. Sell that stock when your price is one they will pay.",
-		"6. If they dislike the quality, choose a refund or a discount. Choose an employee on Market to sell them to another company.",
+		"6. If they dislike the quality, choose a refund or a discount. Staff cards show a level. Upgrade a card with cash. Choose an employee on Market to sell them.",
 		"Love is a number out of 5. It changes how much and how fast the work goes. It does not stop a bad habit.",
 	]:
 		var step := Label.new()
@@ -783,7 +795,7 @@ func _build_call(parent: Control) -> void:
 	call_card.offset_left = -250
 	call_card.offset_top = 58
 	call_card.offset_right = 250
-	call_card.offset_bottom = 250
+	call_card.offset_bottom = 520
 	call_card.add_theme_stylebox_override("panel", _paper_box(Color("e06a58")))
 	parent.add_child(call_card)
 	var box := VBoxContainer.new()
@@ -794,6 +806,12 @@ func _build_call(parent: Control) -> void:
 	call_title.add_theme_font_size_override("font_size", 22)
 	call_title.add_theme_color_override("font_color", INK)
 	box.add_child(call_title)
+	line_label = Label.new()
+	line_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	line_label.custom_minimum_size = Vector2(420, 0)
+	line_label.add_theme_font_override("font", ThemeDB.fallback_font)
+	line_label.add_theme_color_override("font_color", INK)
+	box.add_child(line_label)
 	call_body = Label.new()
 	call_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	call_body.custom_minimum_size = Vector2(420, 0)
@@ -808,14 +826,12 @@ func _build_call(parent: Control) -> void:
 	call_fill.set_anchors_preset(Control.PRESET_FULL_RECT)
 	call_fill.color = Color("3f9a4a")
 	track.add_child(call_fill)
+	call_answers = VBoxContainer.new()
+	call_answers.add_theme_constant_override("separation", 4)
+	box.add_child(call_answers)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
 	box.add_child(row)
-	var pick := Button.new()
-	pick.text = "Pick up"
-	pick.add_theme_font_override("font", ThemeDB.fallback_font)
-	pick.pressed.connect(_pick_up)
-	row.add_child(pick)
 	var leave := Button.new()
 	leave.text = "Let it ring out"
 	leave.add_theme_font_override("font", ThemeDB.fallback_font)
@@ -824,33 +840,64 @@ func _build_call(parent: Control) -> void:
 
 
 func _process(delta: float) -> void:
-	if not started or call_card == null or state == null or state.lost:
-		if call_card != null:
-			call_card.visible = false
+	if state == null or call_card == null:
+		return
+	var finished := ""
+	if started and not state.lost:
+		finished = state.tick_calls(delta)
+	if not started or state.lost:
+		call_card.visible = false
 		return
 	var offer := _waiting_call()
-	if offer.is_empty():
+	var live := state.active_call()
+	if offer.is_empty() and live.is_empty():
 		call_id = ""
 		call_card.visible = false
+		if finished != "":
+			status = finished
+			_show_view()
 		return
-	var id := str(offer["id"])
-	if id != call_id:
-		call_id = id
-		call_left = CALL_PATIENCE
-	call_left = maxf(call_left - delta, 0.0)
-	var buyer: GameState.Person = state.person(str(offer["partner_id"]))
-	var goods := buyer.goods if buyer.goods != "" else "units"
-	call_title.text = "%s is calling" % buyer.display_name
-	call_body.text = "%d %s at %d each. The bar is how long they stay on the line." % [int(offer["units"]), goods, int(offer["unit_price"])]
-	var ratio := clampf(call_left / CALL_PATIENCE, 0.0, 1.0)
-	call_fill.offset_right = -420.0 * (1.0 - ratio)
-	call_fill.color = Color("3f9a4a").lerp(Color("c4473a"), 1.0 - ratio)
 	call_card.visible = true
-	if call_left <= 0.0:
-		var ended := call_id
+	if live.is_empty():
+		line_label.text = ""
+	else:
+		var caller: GameState.Person = state.person(str(live["partner_id"]))
+		var speaker := "Someone"
+		var speaker_level := 0
+		for member_id in live["crew"]:
+			var member: GameState.Person = state.person(str(member_id))
+			speaker = member.display_name
+			speaker_level = member.level
+		line_label.text = "%s %d is on the line with %s. %s left." % [speaker, speaker_level, caller.display_name, state.clock_text(float(live.get("seconds_left", 0)))]
+	var ringing := not offer.is_empty()
+	call_body.visible = ringing
+	call_fill.get_parent().visible = ringing
+	call_answers.visible = ringing
+	if ringing:
+		var id := str(offer["id"])
+		if id != call_id:
+			call_id = id
+			call_left = CALL_PATIENCE
+			_fill_answer_buttons(id)
+		call_left = maxf(call_left - delta, 0.0)
+		var buyer: GameState.Person = state.person(str(offer["partner_id"]))
+		var goods := buyer.goods if buyer.goods != "" else "units"
+		call_title.text = "%s is calling" % buyer.display_name
+		call_body.text = "%d %s at %d each. Booked for %s. Choose a card to take it." % [int(offer["units"]), goods, int(offer["unit_price"]), state.clock_text(float(buyer.call_seconds))]
+		var ratio := clampf(call_left / CALL_PATIENCE, 0.0, 1.0)
+		call_fill.offset_right = -420.0 * (1.0 - ratio)
+		call_fill.color = Color("3f9a4a").lerp(Color("c4473a"), 1.0 - ratio)
+		if call_left <= 0.0:
+			var ended := call_id
+			call_id = ""
+			status = state.reject_order(ended)
+			_show_view()
+			return
+	else:
+		call_title.text = "On the line"
 		call_id = ""
-		call_card.visible = false
-		status = state.reject_order(ended)
+	if finished != "":
+		status = finished
 		_show_view()
 
 
@@ -861,15 +908,49 @@ func _waiting_call() -> Dictionary:
 	return {}
 
 
-func _pick_up() -> void:
-	if call_id == "":
+func _fill_answer_buttons(deal_id: String) -> void:
+	if call_answers == null:
 		return
-	var id := call_id
-	call_id = ""
-	call_card.visible = false
-	status = state.accept_order(id)
-	view = "orders"
-	_show_view()
+	for child in call_answers.get_children():
+		child.queue_free()
+	var open := state.free_for_call()
+	if open.is_empty():
+		var empty := Label.new()
+		empty.text = "Every employee is already on a call."
+		empty.add_theme_font_override("font", ThemeDB.fallback_font)
+		empty.add_theme_color_override("font_color", INK)
+		call_answers.add_child(empty)
+		return
+	for person in open:
+		_bind_answer(call_answers, deal_id, person.id)
+
+
+func _answer_buttons(deal_id: String) -> void:
+	var open := state.free_for_call()
+	if open.is_empty():
+		_card(GOLD, ["Calls", "Every employee is already on a call.", "Wait for the line to clear.", ""])
+		return
+	for person in open:
+		_bind_answer(panel, deal_id, person.id)
+
+
+func _bind_answer(parent: Node, deal_id: String, employee_id: String) -> void:
+	var person := state.person(employee_id)
+	var buyer: GameState.Person = state.person(str(state._deal_by_id(deal_id)["partner_id"]))
+	var button := Button.new()
+	button.text = "%s %d takes it  %s" % [person.display_name, person.level, state.clock_text(float(state.call_length(buyer, person)))]
+	button.add_theme_font_override("font", ThemeDB.fallback_font)
+	button.pressed.connect(func() -> void:
+		call_id = ""
+		_note(func() -> String: return state.accept_order(deal_id, employee_id))
+	)
+	parent.add_child(button)
+
+
+func _staff_card(person: GameState.Person) -> void:
+	var card := PlayerCard.new()
+	card.show_person(state, person)
+	panel.add_child(card)
 
 
 func _ring_out() -> void:
@@ -887,6 +968,8 @@ func _call_stage(stage: String) -> String:
 	match stage:
 		"offer":
 			return "Calling"
+		"on_call":
+			return "On the line"
 		"proposal":
 			return "On the call"
 		"doing":
@@ -902,7 +985,10 @@ func _call_stage(stage: String) -> String:
 func _show_market() -> void:
 	if chosen_employee != "" and (not state.people.has(chosen_employee) or not state.person(chosen_employee).hired):
 		chosen_employee = ""
-	_card(SEA, ["Outbox", "Ready stock", "Qty %d" % state.stock, "Sits on the counter"])
+	_card(SEA, ["Outbox", "All supplier stock", "Qty %d" % state.stock, "Sits on the counter"])
+	for id in state.known_suppliers:
+		var supplier: GameState.Person = state.person(str(id))
+		_card(SEA, [supplier.goods, supplier.display_name, "Qty %d" % state.ingredient_qty(str(id)), "Inventory"])
 	_card(GOLD, ["Order", "Product", "Qty needed", "Pays up to"])
 	var any_order := false
 	for deal in state.open_deals():
@@ -924,9 +1010,10 @@ func _show_market() -> void:
 		_card(PLUM, ["Employees", "Nobody is hired.", "Hire on Recruit, then choose them here.", ""])
 	for person in state.hired_people():
 		var picked: bool = chosen_employee == person.id
+		_staff_card(person)
 		_card(PLUM, [
 			person.display_name,
-			person.gift_line(),
+			"Level %d  %s" % [person.level, state.card_role(person)],
 			"Love %s" % state.hearts(person.love),
 			"Chosen" if picked else "On the desk",
 		], person.id)
