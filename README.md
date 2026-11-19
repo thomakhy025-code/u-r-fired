@@ -1,12 +1,8 @@
 # U r fired
 
-Godot 4.7 project for a company-director simulation.
+Godot 4.7 project for a small real-time office.
 
-You direct a company by pressing buttons. There is no character to walk. The director sits in one room. Empty desks outside fill when someone is hired.
-
-The signs on the right are mail, the newspaper, customer orders, suppliers, recruiting, and the bank. The bank sign shows the interest rate. A deal with a customer or a supplier moves only after you assign one employee, or a few. They report at proposal, doing, and almost finish. Each report lists every heart on that deal.
-
-Love changes how much work is finished, how fast it moves, and the terms. Strengths and bad habits are separate. A paid training period takes someone off the job and rolls three independent chances: a milder temper, a larger workload, and a faster pace.
+Name the company, then run the room. Tap a desk to start a product, wait out the seconds, and tap the finished job onto the outbox. The phone rings with a caller who wants one product. Hand that product over before the patience bar runs out and they pay cash. Restock the shelf, wipe up papers and cups, hire a person, and buy a faster desk, another outbox slot, a second phone line, or a bigger shelf.
 
 Open `project.godot` in Godot 4.7.2 (the standard editor, not the .NET build). The scene is `scenes/main.tscn`.
 

@@ -1,1795 +1,612 @@
 class_name GameState
 extends RefCounted
 
-## Company simulation. The director is the player and has no love.
+## Real-time office. Desks make products, the outbox holds them, callers buy them.
 
-const TRAINING_FEE := 500
-const BAIL_AMOUNT := 600
-const SEASON_WEEKS := 8
-const SEAT_COUNT := 4
-const WAGE_START := 200
-const WAGE_RAISED := 320
-const CONSUMER_FINE := 350
-const WAGE_FINE := 500
-const SUBSIDY_GRANT := 1000
-const SUBSIDY_PENALTY := 400
-const SUBSIDY_LOCK := 4
-
-const STRENGTH_TEXT := {
-	"on_time": "meets the deadline",
-	"temper_solver": "settles a bad temper",
-	"long_hours": "bears a long assignment",
-	"catch_junk": "catches junk",
-	"sales": "closes sales",
-	"books": "closes the books",
-	"steady_orders": "steady repeat orders",
-	"large_pay": "large payments",
-	"small_mention": "a small mention of the company",
-	"large_lots": "runs a large lot",
-	"deadline_ship": "ships by the deadline",
-}
-
-const HABIT_TEXT := {
-	"steal": "skims the drawer",
-	"snap": "snaps",
-	"late": "delivers late",
-	"junk": "sends junk goods",
-	"late_or_junk": "delivers late or sends junk",
-	"bankruptcy": "goes broke and asks to borrow company money",
-	"fuss": "fusses over a voucher",
-	"cold_week": "has a cold week",
-	"public_snap": "snaps in public",
-}
+const PRODUCT_ORDER: Array[String] = ["snack", "lunch", "sample", "classkit", "hamper"]
+const SUPPLY_ORDER: Array[String] = ["sheets", "clips", "paper", "ink", "board", "cloth"]
+const CALLER_NAMES: Array[String] = ["Nia Cole", "Ellis Park", "Remy Cho", "Jordan Hale", "Sable Quinn"]
+const CALLER_FACES: Array[String] = ["nia", "ellis", "remy", "jordan", "sable"]
+const UPGRADE_ORDER: Array[String] = ["faster", "outbox", "phone", "shelf"]
+const RESTOCK_COST := 22
+const RESTOCK_SECONDS := 4.0
+const RESTOCK_AMOUNT := 3
+const STAFF_MAX := 5
 
 var rng := RandomNumberGenerator.new()
-var week := 1
-var cash := 3500
-var debt := 0
-var credit := 3
-var rate := 0.076
-var market_jitter := 0.0
-var min_wage := WAGE_START
-var tax_rate := 0.08
-var penalty_unpaid := 0
-var unpaid_weeks := 0
-var wage_raised := false
-var floor_feelings_applied := false
-var subsidy_open := false
-var subsidy_used := false
-var people := {}
-var deals: Array = []
-var mail: Array = []
-var visible_applicants: Array = []
-var hidden_applicants: Array = []
-var known_suppliers: Array = []
-var hidden_suppliers: Array = []
-var cooperate_from := ""
-var pending_think := {}
-var pending_bailout := {}
-var exit_queue: Array = []
-var lost := false
-var loss_reason := ""
-var season_checked := false
-var season_held := false
-var ever_hired := false
-var next_deal := 1
-var next_mail := 1
-var held_junk := false
-var held_late := false
-var week_revenue := 0
-var week_wages := 0
-var week_supplier := 0
-var week_training := 0
-var week_interest := 0
-var credit_buffer := 0
 var company_name := "Company"
-var stock := 0
-var inventory := {}
-var lifetime_profit := 0
-var suppress_habits := false
-var forced_habits := {}
-var rolled_habits := {}
-var policy_blurb := "The current rules are posted."
+var cash := 48
+var supplies: Dictionary = {}
+var desks: Array[Desk] = []
+var outbox: Array[String] = []
+var callers: Array[Caller] = []
+var staff: Array[Staff] = []
+var messes: Array[Mess] = []
+var outbox_slots := 2
+var phone_lines := 1
+var shelf_size := 8
+var desk_rank := 0
+var restock_left := 0.0
+var spawn_wait := 9.0
+var mess_wait := 14.0
+var allow_tips := true
+var ambient := true
+var notice := ""
+var last_mood := ""
+var mood_left := 0.0
+var next_caller := 0
+
 
 func _init(seed_value: int = 1) -> void:
 	rng.seed = seed_value
 
 
-class Person:
+class Desk:
+	var product_id := ""
+	var seconds_left := 0.0
+	var seconds_full := 0.0
+	var phase := "idle"
+
+
+class Caller:
+	var display_name := ""
+	var face_id := ""
+	var product_id := ""
+	var patience := 0.0
+	var patience_full := 0.0
+	var pay := 0
+
+
+class Staff:
 	var id := ""
 	var display_name := ""
 	var role := ""
-	var balance := ""
-	var strengths: Array = []
-	var habit := ""
-	var severity := "minor"
-	var love := 3
-	var base_workload := 3
-	var base_pace := 3
-	var ask := 0
-	var pay := 0
-	var active := true
-	var hired := false
-	var seat := -1
-	var training := false
-	var junior := false
-	var subsidy_weeks := 0
-	var goods := ""
-	var recipe := ""
-	var returns := true
-	var made := 0
 	var level := 1
-	var call_seconds := 60
-	var needs: Dictionary = {}
+	var hired := false
+	var hire_cost := 30
 
-	func has_strength(gift: String) -> bool:
-		return strengths.has(gift)
 
-	func gift_line() -> String:
-		var parts: Array = []
-		for gift in strengths:
-			parts.append(GameState.STRENGTH_TEXT.get(gift, gift))
-		return ", ".join(parts)
-
-	func habit_line() -> String:
-		return GameState.HABIT_TEXT.get(habit, habit)
+class Mess:
+	var kind := "papers"
+	var coins := 4
 
 
 func setup_new_game() -> void:
-	people.clear()
-	deals.clear()
-	mail.clear()
-	_add(_person("mina", "Mina", "employee", "great strength, minor flaw", ["catch_junk", "temper_solver"], "snap", "minor", 3, 4, 3, 480, false))
-	_add(_person("june", "June", "employee", "great strength, minor flaw", ["books", "on_time"], "fuss", "minor", 3, 3, 4, 460, false))
-	_add(_person("otto", "Otto", "employee", "thin strength, serious flaw", ["long_hours"], "steal", "serious", 3, 2, 2, 240, true))
-	_add(_person("ben", "Ben", "employee", "mixed", ["temper_solver", "sales"], "bankruptcy", "serious", 3, 3, 3, 520, false))
-	_add(_person("rosa", "Rosa", "employee", "great strength, minor flaw", ["catch_junk", "on_time"], "late", "minor", 3, 3, 3, 440, false))
-	_add(_person("ken", "Ken", "employee", "mixed", ["long_hours"], "snap", "moderate", 3, 4, 3, 400, false))
-	_add(_person("priya", "Priya", "employee", "great strength, minor flaw", ["books", "sales"], "fuss", "minor", 3, 3, 4, 500, false))
-	_add(_person("sam", "Sam", "employee", "thin strength, serious flaw", ["sales"], "steal", "serious", 3, 2, 3, 260, true))
-	_add(_person("noor", "Noor", "employee", "mixed", ["temper_solver", "catch_junk"], "cold_week", "minor", 3, 3, 3, 470, false))
-	_add(_person("auntie", "Auntie Shop", "customer", "great strength, minor flaw", ["steady_orders", "on_time"], "cold_week", "minor", 4, 3, 3, 48, false, "Snack Boxes", "A desk prepares snack boxes from supplier stock."))
-	_add(_person("lau", "Mr. Lau", "customer", "mixed", ["large_pay"], "snap", "serious", 3, 4, 3, 70, false, "Gift Hampers", "A desk prepares gift hampers from a larger stock."))
-	_add(_person("influencer", "The Influencer", "customer", "thin strength, serious flaw", ["small_mention"], "public_snap", "serious", 2, 2, 2, 30, false, "Sample Kits", "A desk prepares a small run of sample kits."))
-	_add(_person("cafe", "Corner Cafe", "customer", "great strength, minor flaw", ["steady_orders"], "cold_week", "minor", 3, 3, 3, 40, false, "Lunch Packs", "A desk prepares lunch packs from supplier stock."))
-	_add(_person("school", "School Desk", "customer", "mixed", ["large_pay", "on_time"], "snap", "minor", 3, 3, 3, 44, false, "Class Kits", "A desk prepares class kits from supplier stock."))
-	_add(_person("steady", "Steady Supply", "supplier", "great strength, minor flaw", ["deadline_ship", "on_time"], "snap", "minor", 3, 3, 4, 32, false, "card sheets", "Ships card the staff can pack."))
-	_add(_person("cheap", "Cheap Parts", "supplier", "thin strength, serious flaw", ["large_lots"], "late_or_junk", "serious", 2, 5, 2, 18, false, "clips", "Ships a big lot of clips."))
-	_add(_person("north", "North Mill", "supplier", "great strength, minor flaw", ["on_time"], "snap", "minor", 3, 3, 3, 36, false, "sturdy board", "Ships board that packs cleanly."))
-	_add(_person("harbor", "Harbor Paper", "supplier", "great strength, minor flaw", ["deadline_ship"], "snap", "minor", 3, 3, 4, 28, false, "paper rolls", "Ships paper by the deadline."))
-	_add(_person("ink", "Bright Ink", "supplier", "thin strength, serious flaw", ["large_lots"], "late", "serious", 2, 4, 2, 16, false, "ink", "Ships a large lot, sometimes late."))
-	_add(_person("oak", "Oak Crates", "supplier", "mixed", ["on_time"], "snap", "minor", 3, 3, 3, 30, false, "crates", "Ships crates the boxes travel in."))
-	_add(_person("cloth", "Soft Cloth", "supplier", "great strength, minor flaw", ["on_time"], "fuss", "minor", 3, 3, 3, 26, false, "cloth", "Ships cloth for wrapping."))
-	_add(_person("glass", "Night Glass", "supplier", "thin strength, serious flaw", ["large_lots"], "junk", "serious", 2, 4, 2, 14, false, "glass sheets", "Ships glass that can arrive as junk."))
-	person("sam").level = 54
-	person("otto").level = 58
-	person("ken").level = 63
-	person("noor").level = 66
-	person("ben").level = 69
-	person("rosa").level = 71
-	person("mina").level = 74
-	person("june").level = 77
-	person("priya").level = 81
-	person("cafe").call_seconds = 90
-	person("cafe").needs = {"harbor": 1}
-	person("auntie").call_seconds = 120
-	person("auntie").needs = {"steady": 1}
-	person("influencer").call_seconds = 160
-	person("influencer").needs = {"cheap": 1}
-	person("school").call_seconds = 200
-	person("school").needs = {"steady": 1, "ink": 1}
-	person("lau").call_seconds = 240
-	person("lau").needs = {"north": 1, "cloth": 1}
-	visible_applicants = ["mina"]
-	hidden_applicants = ["otto", "june", "ben", "rosa", "ken", "priya", "sam", "noor"]
-	known_suppliers = ["steady", "cheap"]
-	hidden_suppliers = ["north", "harbor", "ink", "oak", "cloth", "glass"]
-	cooperate_from = "steady"
-	_recompute_rate(false)
-	policy_blurb = "Week 1. The office is open. These are the rules in force."
-	_push_mail("Government note", _rules_note("The published rules are now in force for this company."), "government")
-	_push_mail("Application", "Mina applied. She is waiting on the recruit sign.\n" + _applicant_card(person("mina")), "application")
-	_push_mail("Supplier", "Steady Supply asks to cooperate. Their price is 32 a unit. Answer them on the supplier sign.", "cooperate")
-	_push_mail("Bank", "The rate on the sign is %s." % rate_text(), "rate")
+	cash = 48
+	company_name = "Company"
+	outbox_slots = 2
+	phone_lines = 1
+	shelf_size = 8
+	desk_rank = 0
+	restock_left = 0.0
+	spawn_wait = 9.0
+	mess_wait = 14.0
+	allow_tips = true
+	ambient = true
+	notice = ""
+	last_mood = ""
+	mood_left = 0.0
+	next_caller = 0
+	supplies = {
+		"sheets": 4,
+		"clips": 4,
+		"paper": 3,
+		"ink": 3,
+		"board": 2,
+		"cloth": 2,
+	}
+	desks.clear()
+	desks.append(Desk.new())
+	desks.append(Desk.new())
+	outbox.clear()
+	callers.clear()
+	messes.clear()
+	staff.clear()
+	_add_staff("mina", "Mina Pell", "PACK", 34)
+	_add_staff("june", "June Orr", "DESK", 44)
+	_add_staff("otto", "Otto Lang", "RUSH", 30)
+	_add_staff("rosa", "Rosa Kim", "LINE", 38)
 
 
-func person(id: String) -> Person:
-	return people[id]
+func _add_staff(id: String, display_name: String, role: String, hire_cost: int) -> void:
+	var person := Staff.new()
+	person.id = id
+	person.display_name = display_name
+	person.role = role
+	person.hire_cost = hire_cost
+	staff.append(person)
 
 
-func _person(id: String, display_name: String, role: String, balance: String, strengths: Array, habit: String, severity: String, love: int, workload: int, pace: int, ask: int, junior: bool, goods: String = "", recipe: String = "") -> Person:
-	var p := Person.new()
-	p.id = id
-	p.display_name = display_name
-	p.role = role
-	p.balance = balance
-	p.strengths = strengths.duplicate()
-	p.habit = habit
-	p.severity = severity
-	p.love = love
-	p.base_workload = workload
-	p.base_pace = pace
-	p.ask = ask
-	p.junior = junior
-	p.goods = goods
-	p.recipe = recipe
-	return p
-
-
-func _add(p: Person) -> void:
-	people[p.id] = p
-
-
-func hired_people() -> Array:
-	var found: Array = []
-	for id in people.keys():
-		var p: Person = people[id]
-		if p.role == "employee" and p.hired and p.active:
-			found.append(p)
-	return found
-
-
-func active_people() -> Array:
-	var found: Array = []
-	for id in people.keys():
-		var p: Person = people[id]
-		if p.active:
-			found.append(p)
-	return found
-
-
-func hearts(n: int) -> String:
-	return "%d/5" % clampi(n, 0, 5)
-
-
-func rate_text() -> String:
-	return str(snapped(rate * 100.0, 0.1)) + "%"
-
-
-func unread_count() -> int:
-	var count := 0
-	for item in mail:
-		if not item["read"]:
-			count += 1
-	return count
-
-
-func newspaper_text() -> String:
-	var subsidy := "No hiring subsidy is open."
-	if subsidy_open and not subsidy_used:
-		subsidy = "A hiring subsidy is open: %d if you hire, and that person stays %d weeks. Firing them early returns the grant plus a %d penalty." % [SUBSIDY_GRANT, SUBSIDY_LOCK, SUBSIDY_PENALTY]
-	elif subsidy_used:
-		subsidy = "The hiring subsidy has been taken. The locked employee must finish the printed weeks."
-	var unpaid := "No penalties are waiting."
-	if penalty_unpaid > 0:
-		unpaid = "Unpaid penalties: %d. Doors shut after penalties stay unpaid for two weeks." % penalty_unpaid
-	return """%s
-
-Wage floor: %d
-Tax: %d%% of a week's profit
-%s
-
-Penalty table
-- Pay under the wage floor: %d
-- Consumer complaint: %d
-- Unpaid tax: the unpaid amount, added to penalties
-- Closure: a note shuts the company after penalties stay unpaid for two weeks
-
-%s
-
-The government posts the rule. It does not keep a heart score.""" % [policy_blurb, min_wage, int(tax_rate * 100), subsidy, WAGE_FINE, CONSUMER_FINE, unpaid]
-
-
-func heart_scale(love: int) -> float:
-	match clampi(love, 0, 5):
-		0:
-			return 0.0
-		1:
-			return 0.30
-		2:
-			return 0.45
-		3:
-			return 0.65
-		4:
-			return 0.85
+func supply_name(supply_id: String) -> String:
+	match supply_id:
+		"sheets":
+			return "Card sheets"
+		"clips":
+			return "Clips"
+		"paper":
+			return "Paper rolls"
+		"ink":
+			return "Ink"
+		"board":
+			return "Board"
+		"cloth":
+			return "Cloth"
 		_:
-			return 1.0
+			return supply_id
 
 
-func finished_units(p: Person, demand: int) -> int:
-	var cap := p.base_workload * 10
-	var amount := int(round(float(cap) * heart_scale(p.love)))
-	if p.has_strength("long_hours") and demand > cap:
-		amount += int(round(float(p.base_workload) * 4.0 * heart_scale(p.love)))
-	return clampi(amount, 0, maxi(demand, 0))
+func supply_qty(supply_id: String) -> int:
+	return int(supplies.get(supply_id, 0))
 
 
-func pace_rank(p: Person) -> int:
-	return p.love + p.base_pace
-
-
-func pace_day(p: Person) -> String:
-	var speed := pace_rank(p)
-	if speed >= 9:
-		return "Monday"
-	if speed >= 7:
-		return "Wednesday"
-	if speed >= 5:
-		return "Friday"
-	return "late in the week"
-
-
-func habit_chance(severity: String) -> float:
-	match severity:
-		"faint":
-			return 0.08
-		"minor":
-			return 0.18
-		"moderate":
-			return 0.35
-		"serious":
-			return 0.55
+func product_name(product_id: String) -> String:
+	match product_id:
+		"snack":
+			return "Snack Boxes"
+		"lunch":
+			return "Lunch Packs"
+		"sample":
+			return "Sample Kits"
+		"classkit":
+			return "Class Kits"
+		"hamper":
+			return "Gift Hampers"
 		_:
-			return 0.2
+			return product_id
 
 
-func roll_training_dice() -> Array:
-	return [rng.randf() < 0.5, rng.randf() < 0.5, rng.randf() < 0.5]
-
-
-func severity_softer(severity: String) -> String:
-	match severity:
-		"serious":
-			return "moderate"
-		"moderate":
-			return "minor"
-		"minor":
-			return "faint"
+func product_cost(product_id: String) -> int:
+	match product_id:
+		"snack":
+			return 6
+		"lunch":
+			return 8
+		"sample":
+			return 10
+		"classkit":
+			return 14
+		"hamper":
+			return 18
 		_:
-			return "faint"
-
-
-func apply_training(p: Person, rolls: Array) -> String:
-	var temper := "unchanged"
-	var load := "unchanged"
-	var speed := "unchanged"
-	if bool(rolls[0]):
-		var next := severity_softer(p.severity)
-		if next != p.severity:
-			p.severity = next
-			temper = "a bit milder"
-		else:
-			temper = "already faint"
-	if bool(rolls[1]):
-		if p.base_workload < 6:
-			p.base_workload += 1
-			load = "one step larger"
-		else:
-			load = "already at the top step"
-	if bool(rolls[2]):
-		if p.base_pace < 6:
-			p.base_pace += 1
-			speed = "one step faster"
-		else:
-			speed = "already at the top step"
-	return "%s's course. Temper: %s. Workload: %s. Speed: %s." % [p.display_name, temper, load, speed]
-
-
-func open_deals() -> Array:
-	var found: Array = []
-	for deal in deals:
-		if str(deal["stage"]) != "closed":
-			found.append(deal)
-	return found
-
-
-func recruit_offer(id: String, offer: int) -> String:
-	if lost:
-		return loss_reason
-	var p: Person = person(id)
-	if p.hired:
-		return "%s already sits in the office." % p.display_name
-	if not visible_applicants.has(id):
-		return "They are not on the recruit sign."
-	if _free_seat() < 0:
-		return "Every chair is full."
-	if offer < min_wage:
-		_push_mail("Government note", _rules_note("The offer to %s was %d, under the wage floor of %d. They can report it. No hire was made." % [p.display_name, offer, min_wage]), "government")
-		return "That offer is under the wage floor."
-	return _negotiate(p, offer, "hire")
-
-
-func supplier_offer(id: String, offer: int) -> String:
-	if lost:
-		return loss_reason
-	if not known_suppliers.has(id):
-		return "That supplier is not on the list."
-	var p: Person = person(id)
-	if not p.active:
-		return "%s has ended the contract." % p.display_name
-	return _negotiate(p, offer, "supply")
-
-
-func insist(id: String) -> String:
-	if not pending_think.has(id):
-		return "Nobody is waiting on a reply."
-	var pending: Dictionary = pending_think[id]
-	pending_think.erase(id)
-	var p: Person = person(id)
-	return _close_offer(p, int(pending["offer"]), str(pending["kind"]), 2)
-
-
-func look_for_applicant() -> String:
-	if hidden_applicants.is_empty():
-		return "Nobody else is looking this week."
-	var id: String = hidden_applicants.pop_front()
-	visible_applicants.append(id)
-	var p: Person = person(id)
-	_push_mail("Application", "%s is now on the recruit sign.\n%s" % [p.display_name, _applicant_card(p)], "application")
-	return "%s can be hired from the recruit sign." % p.display_name
-
-
-func find_supplier() -> String:
-	if hidden_suppliers.is_empty():
-		return "You already know the suppliers you can find."
-	var id: String = hidden_suppliers.pop_front()
-	known_suppliers.append(id)
-	var p: Person = person(id)
-	_push_mail("Supplier", "You found %s. They sell %s. Their ask is %d a unit. %s" % [p.display_name, p.goods, p.ask, _profile(p)], "cooperate")
-	return "%s is now on the supplier sign." % p.display_name
-
-
-func accept_cooperation() -> String:
-	if cooperate_from == "":
-		return "No supplier is waiting on an answer."
-	var id := cooperate_from
-	var p: Person = person(id)
-	return supplier_offer(id, p.ask)
-
-
-func set_wage(id: String, amount: int) -> String:
-	if lost:
-		return loss_reason
-	var p: Person = person(id)
-	if not p.hired:
-		return "They do not work here."
-	if amount < min_wage:
-		return "The wage floor is %d. The newspaper prints a fine for paying under it." % min_wage
-	var before := p.pay
-	p.pay = amount
-	if amount > before and amount >= p.ask:
-		shift_love(p, 1, "the pay met their ask")
-	elif amount < before:
-		shift_love(p, -1, "the pay was cut")
-	_jealousy(p)
-	resolve_exits()
-	return "%s is paid %d. %s" % [p.display_name, p.pay, hearts(p.love)]
-
-
-func comply_wage_floor() -> String:
-	if lost:
-		return loss_reason
-	var raised: Array = []
-	for p in hired_people():
-		if p.pay < min_wage:
-			p.pay = min_wage
-			raised.append(p.display_name)
-			if p.junior:
-				shift_love(p, 1, "the wage floor reached them")
-	if not floor_feelings_applied:
-		floor_feelings_applied = true
-		for p in hired_people():
-			if not p.junior and p.pay < min_wage + 120:
-				shift_love(p, -1, "the gap over the new floor got smaller")
-	resolve_exits()
-	if raised.is_empty():
-		return "Everyone is already at the wage floor."
-	return "Raised to the floor: " + ", ".join(raised)
-
-
-func train(id: String) -> String:
-	if lost:
-		return loss_reason
-	var p: Person = person(id)
-	if not p.hired or not p.active:
-		return "They are not on a chair."
-	if p.training:
-		return "%s is already on a course this period." % p.display_name
-	if cash < TRAINING_FEE:
-		return "The course costs %d, on top of salary." % TRAINING_FEE
-	cash -= TRAINING_FEE
-	week_training += TRAINING_FEE
-	p.training = true
-	_pull_from_deals(p, true)
-	resolve_exits()
-	return "%s stays in their seat and does no work this period. The fee is paid." % p.display_name
-
-
-func assign(employee_id: String, deal_id: String, on: bool) -> String:
-	if lost:
-		return loss_reason
-	var p: Person = person(employee_id)
-	if not p.hired or not p.active:
-		return "They are not in a chair."
-	if p.training:
-		return "%s is training and cannot follow a deal this period." % p.display_name
-	var deal := _deal_by_id(deal_id)
-	if deal.is_empty() or str(deal["stage"]) == "closed":
-		return "That deal is not open."
-	var crew: Array = deal["crew"]
-	if not on:
-		crew.erase(employee_id)
-		if crew.is_empty():
-			_partner_abandoned(deal)
-			resolve_exits()
-		return "%s stepped off the deal." % p.display_name
-	if crew.has(employee_id):
-		return "%s is already on it." % p.display_name
-	if crew.size() >= 3:
-		return "A few employees can follow one deal. Three are already on it."
-	for other in deals:
-		if str(other["stage"]) == "closed":
-			continue
-		var other_crew: Array = other["crew"]
-		if other_crew.has(employee_id):
-			other_crew.erase(employee_id)
-			if other_crew.is_empty():
-				_partner_abandoned(other)
-	crew.append(employee_id)
-	resolve_exits()
-	return "%s will follow this deal." % p.display_name
-
-
-func release_to_market(id: String) -> String:
-	var p: Person = person(id)
-	if not p.hired:
-		return ""
-	var name := p.display_name
-	p.hired = false
-	p.training = false
-	p.seat = -1
-	_pull_from_deals(p, false)
-	visible_applicants.erase(id)
-	return name
-
-
-func fire(id: String) -> String:
-	if lost:
-		return loss_reason
-	var p: Person = person(id)
-	if not p.hired:
-		return "They are not employed."
-	var name := p.display_name
-	var locked := p.subsidy_weeks
-	p.active = false
-	p.hired = false
-	p.training = false
-	p.seat = -1
-	_pull_from_deals(p, true)
-	if locked > 0:
-		var bill := SUBSIDY_GRANT + SUBSIDY_PENALTY
-		cash -= bill
-		_push_mail("Government note", _rules_note("%s was fired during the subsidy lock. The grant is returned and the penalty is %d. Paid %d." % [name, SUBSIDY_PENALTY, bill]), "government")
-	for other in hired_people():
-		shift_love(other, -1, "a colleague was fired")
-	resolve_exits()
-	_push_mail("Office", "%s left the chair." % name, "note")
-	return "%s is no longer employed." % name
-
-
-func borrow(amount: int) -> String:
-	if lost:
-		return loss_reason
-	if amount < 100:
-		return "The bank's smallest loan is 100."
-	cash += amount
-	debt += amount
-	_recompute_rate(true)
-	return "The bank lent %d. The rate on the sign is %s." % [amount, rate_text()]
-
-
-func pay_penalties() -> String:
-	if penalty_unpaid <= 0:
-		return "Nothing is owed to the government."
-	if cash < penalty_unpaid:
-		return "The unpaid penalties are %d and the cash is %d." % [penalty_unpaid, cash]
-	cash -= penalty_unpaid
-	penalty_unpaid = 0
-	unpaid_weeks = 0
-	_push_mail("Government note", _rules_note("The printed penalties were paid. The file is clear."), "government")
-	return "The penalties are paid."
-
-
-func answer_bailout(lend: bool) -> String:
-	if pending_bailout.is_empty():
-		return "Nobody is asking to borrow."
-	var id := str(pending_bailout["id"])
-	var amount := int(pending_bailout["amount"])
-	pending_bailout = {}
-	var p: Person = person(id)
-	if not p.hired or not p.active:
-		return "%s is no longer here." % p.display_name
-	if lend:
-		if cash < amount:
-			pending_bailout = {"id": id, "amount": amount}
-			return "The company does not have %d free." % amount
-		cash -= amount
-		shift_love(p, 1, "the company covered the debt")
-		if credit > 0:
-			credit -= 1
-			_recompute_rate(true)
-		resolve_exits()
-		return "Lent %d to %s. It stays out of the drawer. %s" % [amount, p.display_name, hearts(p.love)]
-	shift_love(p, -1, "the company refused the debt")
-	resolve_exits()
-	return "Refused %s. %s" % [p.display_name, hearts(p.love)]
-
-
-func break_contract(id: String) -> String:
-	var p: Person = person(id)
-	if p.role != "supplier":
-		return "That is not a supplier."
-	p.love = 0
-	p.active = false
-	cash -= 200
-	for deal in deals:
-		if str(deal["partner_id"]) != id or str(deal["stage"]) == "closed":
-			continue
-		deal["stage"] = "closed"
-		for member_id in deal["crew"]:
-			var member: Person = person(str(member_id))
-			if member.hired and member.active:
-				shift_love(member, -1, "the contract broke mid-deal")
-	if cooperate_from == id:
-		cooperate_from = ""
-	resolve_exits()
-	_push_mail("Supplier", "The contract with %s is broken. The fee is 200." % p.display_name, "note")
-	return "The contract with %s is broken." % p.display_name
-
-
-func end_week() -> String:
-	if lost:
-		return loss_reason
-	week_revenue = 0
-	week_wages = 0
-	week_supplier = 0
-	week_interest = 0
-	rolled_habits = {}
-	for p in hired_people():
-		rolled_habits[p.id] = _build_habit(p)
-	for outsider in _outsiders():
-		if outsider.active:
-			rolled_habits[outsider.id] = _build_habit(outsider)
-	_apply_habit_side_effects()
-	var training_lines: Array = []
-	for p in hired_people():
-		if not p.training:
-			continue
-		var line := apply_training(p, roll_training_dice())
-		var incident: Dictionary = rolled_habits.get(p.id, {})
-		if not incident.is_empty():
-			line += "\n" + str(incident["text"])
-		training_lines.append(line)
-	if training_lines.size() > 0:
-		_push_mail("Training", "\n".join(training_lines), "training")
-	for deal in _deals_of_kind("supplier"):
-		_resolve_stage(deal)
-	for deal in _deals_of_kind("customer"):
-		_resolve_stage(deal)
-	for p in hired_people():
-		p.training = false
-	_june_reveal()
-	_pay_wages()
-	_pay_tax()
-	_pay_interest()
-	_tick_subsidies()
-	_law_check()
-	resolve_exits()
-	_credit_tick()
-	_ledger()
-	_check_endings()
-	if lost:
-		return loss_reason
-	week += 1
-	_begin_week()
-	return "Week %d." % week
-
-
-func shift_love(p: Person, delta: int, reason: String) -> String:
-	if delta == 0 or not p.active:
-		return "%s %d." % [p.display_name, p.love]
-	var before := p.love
-	p.love = clampi(p.love + delta, 0, 5)
-	var applied := p.love - before
-	if applied == 0:
-		return "%s %d." % [p.display_name, p.love]
-	if p.love == 0 and p.active:
-		if not exit_queue.has(p.id):
-			exit_queue.append(p.id)
-	var sign := "+" if applied > 0 else ""
-	var line := "%s %d (%s%d, %s)." % [p.display_name, p.love, sign, applied, reason]
-	if p.love == 0:
-		line += " Their term ended."
-	return line
-
-
-func resolve_exits() -> void:
-	var guard := 0
-	while exit_queue.size() > 0 and guard < 16:
-		guard += 1
-		var id: String = exit_queue.pop_front()
-		var p: Person = person(id)
-		if not p.active:
-			continue
-		if p.love > 0:
-			continue
-		p.active = false
-		p.training = false
-		if p.hired:
-			p.hired = false
-			p.seat = -1
-			_pull_from_deals(p, true)
-			_push_mail("Office", "%s left the chair. Their love is 0." % p.display_name, "note")
-		else:
-			for deal in deals:
-				if str(deal["partner_id"]) == id and str(deal["stage"]) != "closed":
-					deal["stage"] = "closed"
-					deal["crew"] = []
-			_push_mail("Account", "%s ended the account." % p.display_name, "note")
-		if p.role == "customer" and _customers_all_gone():
-			_lose("Every customer ended the account.")
-
-
-func _negotiate(p: Person, offer: int, kind: String) -> String:
-	if offer <= 0:
-		return "The offer has to be a number above zero."
-	var ratio := float(offer) / float(maxi(p.ask, 1))
-	if ratio + 0.001 >= 1.0:
-		var love := 5 if ratio >= 1.2 else 4
-		return _close_offer(p, offer, kind, love)
-	if ratio >= 0.85:
-		pending_think[p.id] = {"offer": offer, "kind": kind}
-		return "%s will think about %d. Insist, or raise the offer." % [p.display_name, offer]
-	if ratio >= 0.7:
-		return _close_offer(p, offer, kind, 1)
-	return "%s rejected %d." % [p.display_name, offer]
-
-
-func _close_offer(p: Person, offer: int, kind: String, love: int) -> String:
-	if kind == "hire":
-		if _free_seat() < 0:
-			return "Every chair is full."
-		p.love = love
-		p.pay = offer
-		p.hired = true
-		p.active = true
-		p.seat = _free_seat()
-		visible_applicants.erase(p.id)
-		ever_hired = true
-		if hired_people().size() == 1:
-			_open_order(person("auntie"))
-		var extra := ""
-		if subsidy_open and not subsidy_used:
-			subsidy_used = true
-			p.subsidy_weeks = SUBSIDY_LOCK
-			cash += SUBSIDY_GRANT
-			extra = " The subsidy note granted %d. %s must stay %d weeks." % [SUBSIDY_GRANT, p.display_name, SUBSIDY_LOCK]
-			_push_mail("Government note", _rules_note("The company qualified for the hiring subsidy. %s must stay %d weeks. The grant is %d. Firing them early returns it plus %d." % [p.display_name, SUBSIDY_LOCK, SUBSIDY_GRANT, SUBSIDY_PENALTY]), "government")
-		return "%s accepted %d and sat down. Love %d. %s.%s" % [p.display_name, offer, p.love, p.balance, extra]
-	p.love = love
-	if cooperate_from == p.id:
-		cooperate_from = ""
-	var units := p.base_workload * 8
-	_make_deal("supplier", p.id, units, offer, units >= 40)
-	return "%s accepted %d a unit with love %d. Assign someone to follow the deal." % [p.display_name, offer, p.love]
-
-
-func order_ceiling(customer: Person) -> int:
-	var factor := 0.7 + 0.1 * float(clampi(customer.love, 0, 5))
-	return maxi(1, int(round(float(customer.ask) * factor)))
-
-
-func add_ingredient(id: String, amount: int) -> void:
-	if amount == 0:
-		return
-	var have: int = int(inventory.get(id, 0))
-	inventory[id] = have + amount
-	_recount_stock()
-
-
-func ingredient_qty(id: String) -> int:
-	return int(inventory.get(id, 0))
-
-
-func _recount_stock() -> void:
-	var total := 0
-	for key in inventory.keys():
-		total += maxi(int(inventory[key]), 0)
-	stock = total
-
-
-func ingredient_need(customer: Person, units: int) -> Dictionary:
-	var need := {}
-	for key in customer.needs.keys():
-		need[str(key)] = int(customer.needs[key]) * units
-	return need
-
-
-func missing_ingredient(need: Dictionary) -> String:
-	for key in need.keys():
-		var have := ingredient_qty(str(key))
-		var want: int = int(need[key])
-		if have < want:
-			var supplier: Person = person(str(key))
-			return "Need %d %s. Inventory has %d." % [want, supplier.goods, have]
-	return ""
-
-
-func _take_ingredients(need: Dictionary) -> void:
-	for key in need.keys():
-		add_ingredient(str(key), -int(need[key]))
-
-
-func _give_ingredients(need: Dictionary) -> void:
-	for key in need.keys():
-		add_ingredient(str(key), int(need[key]))
-
-
-func call_length(customer: Person, employee: Person) -> int:
-	var factor := clampf(1.15 - float(employee.level) * 0.005, 0.72, 1.15)
-	return maxi(45, int(round(float(customer.call_seconds) * factor)))
+			return 0
+
+
+func product_seconds(product_id: String) -> float:
+	match product_id:
+		"snack":
+			return 6.0
+		"lunch":
+			return 8.0
+		"sample":
+			return 9.0
+		"classkit":
+			return 11.0
+		"hamper":
+			return 13.0
+		_:
+			return 6.0
+
+
+func product_pay(product_id: String) -> int:
+	match product_id:
+		"snack":
+			return 18
+		"lunch":
+			return 26
+		"sample":
+			return 34
+		"classkit":
+			return 44
+		"hamper":
+			return 58
+		_:
+			return 0
+
+
+func product_patience(product_id: String) -> float:
+	match product_id:
+		"snack":
+			return 22.0
+		"lunch":
+			return 18.0
+		"sample":
+			return 15.0
+		"classkit":
+			return 12.0
+		"hamper":
+			return 9.0
+		_:
+			return 22.0
+
+
+func need_count(product_id: String, supply_id: String) -> int:
+	match product_id:
+		"snack":
+			if supply_id == "sheets" or supply_id == "clips":
+				return 1
+		"lunch":
+			if supply_id == "paper" or supply_id == "ink":
+				return 1
+		"sample":
+			if supply_id == "sheets" or supply_id == "ink":
+				return 1
+		"classkit":
+			if supply_id == "board" or supply_id == "clips":
+				return 1
+		"hamper":
+			if supply_id == "board" or supply_id == "cloth":
+				return 1
+	return 0
+
+
+func speed_factor() -> float:
+	var factor := 1.0
+	var rank := 0
+	while rank < desk_rank:
+		factor *= 0.82
+		rank += 1
+	for person in staff:
+		if person.hired:
+			factor *= 1.0 - 0.06 * float(person.level)
+	if factor < 0.35:
+		return 0.35
+	return factor
+
+
+func job_seconds(product_id: String) -> float:
+	var seconds := product_seconds(product_id) * speed_factor()
+	if seconds < 1.0:
+		return 1.0
+	return seconds
 
 
 func clock_text(seconds: float) -> String:
 	var whole := maxi(int(ceil(seconds)), 0)
-	return "%d:%02d" % [int(whole / 60.0), whole % 60]
+	if whole >= 60:
+		return "%d:%02d" % [int(whole / 60), whole % 60]
+	return "%ds" % whole
 
 
-func card_role(p: Person) -> String:
-	if p.strengths.is_empty():
-		return "DESK"
-	match str(p.strengths[0]):
-		"catch_junk":
-			return "QC"
-		"books":
-			return "AUD"
-		"long_hours":
-			return "OPS"
-		"temper_solver":
-			return "HR"
-		"sales":
-			return "SEL"
-		"on_time":
-			return "OPS"
-		_:
-			return "DESK"
-
-
-func card_stats(p: Person) -> Dictionary:
-	var care := 42 + int(p.level / 3.0)
-	if p.has_strength("catch_junk") or p.has_strength("books"):
-		care += 12
-	var nerve := 78 + int(p.level / 10.0)
-	match p.severity:
-		"faint":
-			nerve -= 4
-		"minor":
-			nerve -= 10
-		"moderate":
-			nerve -= 18
-		_:
-			nerve -= 28
-	var sales := 40 + int(p.level / 5.0)
-	if p.has_strength("sales"):
-		sales += 14
-	var stamina := 42 + int(p.level / 5.0)
-	if p.has_strength("long_hours"):
-		stamina += 14
-	return {
-		"PAC": clampi(p.base_pace * 14 + int(p.level / 6.0), 1, 99),
-		"OUT": clampi(p.base_workload * 14 + int(p.level / 6.0), 1, 99),
-		"CAR": clampi(care, 1, 99),
-		"NRV": clampi(nerve, 1, 99),
-		"SAL": clampi(sales, 1, 99),
-		"STA": clampi(stamina, 1, 99),
-	}
-
-
-func upgrade_cost(p: Person) -> int:
-	return 80 + p.level * 12
-
-
-func upgrade_employee(id: String) -> String:
-	if lost:
-		return loss_reason
-	var p: Person = person(id)
-	if not p.hired:
-		return "%s is not on a card in this office." % p.display_name
-	if p.level >= 89:
-		return "%s is already at 89." % p.display_name
-	var cost := upgrade_cost(p)
+func start_job(desk_index: int, product_id: String) -> String:
+	if desk_index < 0 or desk_index >= desks.size():
+		return "That desk is missing."
+	if not PRODUCT_ORDER.has(product_id):
+		return "Pick a job from the desk."
+	var desk := desks[desk_index]
+	if desk.phase != "idle":
+		return "That desk is busy."
+	var cost := product_cost(product_id)
 	if cash < cost:
-		return "The upgrade costs %d and the cash is %d." % [cost, cash]
+		return "Need %d cash." % cost
+	var missing := ""
+	for supply_id in SUPPLY_ORDER:
+		var count := need_count(product_id, supply_id)
+		if count > supply_qty(supply_id):
+			missing = supply_name(supply_id)
+			break
+	if missing != "":
+		return "Need %s." % missing
 	cash -= cost
-	p.level += 1
-	_push_mail("Card", "%s is now level %d. The upgrade cost %d." % [p.display_name, p.level, cost], "note")
-	return "%s is now %d." % [p.display_name, p.level]
+	for supply_id in SUPPLY_ORDER:
+		var count := need_count(product_id, supply_id)
+		if count > 0:
+			supplies[supply_id] = supply_qty(supply_id) - count
+	var seconds := job_seconds(product_id)
+	desk.product_id = product_id
+	desk.seconds_left = seconds
+	desk.seconds_full = seconds
+	desk.phase = "cooking"
+	return "Started %s." % product_name(product_id)
 
 
-func free_for_call() -> Array:
-	var busy := {}
-	for deal in deals:
-		if str(deal["stage"]) != "on_call":
-			continue
-		for member_id in deal["crew"]:
-			busy[str(member_id)] = true
-	var found: Array = []
-	for p in hired_people():
-		if p.training or busy.has(p.id):
-			continue
-		found.append(p)
-	return found
+func place_on_outbox(desk_index: int) -> String:
+	if desk_index < 0 or desk_index >= desks.size():
+		return "That desk is missing."
+	var desk := desks[desk_index]
+	if desk.phase != "done":
+		return "That desk is still working."
+	if outbox.size() >= outbox_slots:
+		return "The outbox is full."
+	var product_id := desk.product_id
+	outbox.append(product_id)
+	desk.product_id = ""
+	desk.seconds_left = 0.0
+	desk.seconds_full = 0.0
+	desk.phase = "idle"
+	return "%s is on the outbox." % product_name(product_id)
 
 
-func active_call() -> Dictionary:
-	for deal in deals:
-		if str(deal["kind"]) == "customer" and str(deal["stage"]) == "on_call":
-			return deal
-	return {}
+func spawn_caller(product_id: String) -> String:
+	if callers.size() >= phone_lines:
+		return "The lines are full."
+	if not PRODUCT_ORDER.has(product_id):
+		return "Nobody calls for that."
+	var caller := Caller.new()
+	var name_index := next_caller % CALLER_NAMES.size()
+	next_caller += 1
+	caller.display_name = CALLER_NAMES[name_index]
+	caller.face_id = CALLER_FACES[name_index]
+	caller.product_id = product_id
+	caller.pay = product_pay(product_id)
+	caller.patience_full = product_patience(product_id)
+	caller.patience = caller.patience_full
+	callers.append(caller)
+	notice = "%s wants %s." % [caller.display_name, product_name(product_id)]
+	return notice
 
 
-func tick_calls(delta: float) -> String:
-	var notes: Array = []
-	for deal in deals:
-		if str(deal["stage"]) != "on_call":
-			continue
-		if _live_crew(deal).is_empty():
-			_refund_call(deal)
-			notes.append("The line dropped. The stock is back on the shelf.")
-			continue
-		deal["seconds_left"] = float(deal.get("seconds_left", 0.0)) - delta
-		if float(deal["seconds_left"]) <= 0.0:
-			notes.append(_finish_call(deal))
-	if notes.is_empty():
-		return ""
-	resolve_exits()
-	return " ".join(notes)
+func hand_over(caller_index: int) -> String:
+	if caller_index < 0 or caller_index >= callers.size():
+		return "Nobody is on the line."
+	var caller := callers[caller_index]
+	var slot := outbox.find(caller.product_id)
+	if slot < 0:
+		return "Put %s on the outbox first." % product_name(caller.product_id)
+	return _complete_handoff(caller_index, slot, true)
 
 
-func _refund_call(deal: Dictionary) -> void:
-	var held: Variant = deal.get("held", {})
-	if held is Dictionary:
-		_give_ingredients(held)
-	deal["stage"] = "offer"
-	deal["crew"] = []
-	deal["seconds_left"] = 0.0
-	deal["held"] = {}
+func hand_outbox_slot(slot: int) -> String:
+	if slot < 0 or slot >= outbox.size():
+		return "That slot is empty."
+	if callers.is_empty():
+		return "The phone is quiet."
+	var product_id := outbox[slot]
+	var match_index := -1
+	for caller_index in callers.size():
+		if callers[caller_index].product_id == product_id:
+			match_index = caller_index
+			break
+	if match_index >= 0:
+		return _complete_handoff(match_index, slot, true)
+	return _complete_handoff(0, slot, false)
 
 
-func _finish_call(deal: Dictionary) -> String:
-	var buyer: Person = person(str(deal["partner_id"]))
-	var crew := _live_crew(deal)
-	var speaker: Person = crew[0]
-	var units := int(deal["units"])
-	var revenue := units * int(deal["unit_price"])
-	cash += revenue
-	week_revenue += revenue
-	lifetime_profit += revenue
-	speaker.made += units
-	buyer.ask += 6
-	shift_love(buyer, 1, "the call was finished")
-	shift_love(speaker, 1, "they finished the call")
-	deal["stage"] = "closed"
-	deal["crew"] = []
-	deal["pay"] = revenue
-	deal["seconds_left"] = 0.0
-	var line := "%s finished %s in the booked time. Paid %d. %s %d. %s %d." % [speaker.display_name, buyer.goods, revenue, buyer.display_name, buyer.love, speaker.display_name, speaker.love]
-	_push_mail("Call finished", line, "report")
-	return line
+func order_restock() -> String:
+	if restock_left > 0.0:
+		return "A delivery is on the way."
+	if cash < RESTOCK_COST:
+		return "Need %d cash." % RESTOCK_COST
+	var room := false
+	for supply_id in SUPPLY_ORDER:
+		if supply_qty(supply_id) < shelf_size:
+			room = true
+			break
+	if not room:
+		return "The shelf is full."
+	cash -= RESTOCK_COST
+	restock_left = RESTOCK_SECONDS
+	return "Supplies arrive in %s." % clock_text(RESTOCK_SECONDS)
 
 
-func sell_to_order(deal_id: String, unit_price: int) -> String:
-	var deal := _deal_by_id(deal_id)
-	if deal.is_empty() or str(deal["kind"]) != "customer":
-		return "That order is not on the desk."
-	var stage := str(deal["stage"])
-	if stage == "closed" or stage == "quality":
-		return "That order is not open for a sale."
-	if hired_people().is_empty():
-		return "Hire someone before you sell an order."
-	if unit_price <= 0:
-		return "Set a price above zero."
-	var buyer: Person = person(str(deal["partner_id"]))
-	var units := int(deal["units"])
-	var ceiling := order_ceiling(buyer)
-	var goods := buyer.goods if buyer.goods != "" else "units"
-	if unit_price > ceiling:
-		return "%s will pay up to %d for each %s. %d is above that." % [buyer.display_name, ceiling, goods, unit_price]
-	if stage == "on_call":
-		return "An employee is already on that call."
-	var already := bool(deal.get("reserved", false))
-	var need := ingredient_need(buyer, units)
-	if not already:
-		var gap := missing_ingredient(need)
-		if gap != "":
-			return gap
-		_take_ingredients(need)
-		deal["reserved"] = true
-	var revenue := unit_price * units
-	cash += revenue
-	week_revenue += revenue
-	lifetime_profit += revenue
-	deal["stage"] = "closed"
-	deal["crew"] = []
-	deal["pay"] = revenue
-	var listed := buyer.ask
-	buyer.ask += 6 if unit_price >= listed else 2
-	if unit_price <= listed:
-		shift_love(buyer, 1, "they took the goods at the offered price")
-	_push_mail("Sale", "%s accepted %d each and paid %d for %d %s. Inventory is now %d. They may return at a higher price." % [buyer.display_name, unit_price, revenue, units, goods, stock], "order")
-	return "%s accepted %d. Paid %d. Inventory %d." % [buyer.display_name, unit_price, revenue, stock]
+func clean_mess(index: int) -> String:
+	if index < 0 or index >= messes.size():
+		return "That spot is clear."
+	var coins := messes[index].coins
+	messes.remove_at(index)
+	cash += coins
+	return "Cleaned up. +%d" % coins
 
 
-func accept_order(deal_id: String, employee_id: String) -> String:
-	var deal := _deal_by_id(deal_id)
-	if deal.is_empty() or str(deal["stage"]) != "offer":
-		return "That order is not waiting for an answer."
-	if employee_id == "":
-		return "Choose an employee to take the call."
-	var speaker: Person = person(employee_id)
-	if not speaker.hired or speaker.training:
-		return "%s cannot take a call right now." % speaker.display_name
-	for other in deals:
-		if str(other["stage"]) == "on_call" and (other["crew"] as Array).has(employee_id):
-			return "%s is already on a call." % speaker.display_name
-	var buyer: Person = person(str(deal["partner_id"]))
-	var units := int(deal["units"])
-	var need := ingredient_need(buyer, units)
-	var gap := missing_ingredient(need)
-	if gap != "":
-		return gap
-	_take_ingredients(need)
-	var seconds := call_length(buyer, speaker)
-	deal["stage"] = "on_call"
-	deal["crew"] = [employee_id]
-	deal["reserved"] = true
-	deal["held"] = need
-	deal["seconds_left"] = float(seconds)
-	deal["seconds_full"] = float(seconds)
-	return "%s %d takes %s. The call runs %s. Stock for it is off the shelf." % [speaker.display_name, speaker.level, buyer.goods, clock_text(float(seconds))]
+func hire(staff_id: String) -> String:
+	var index := _staff_index(staff_id)
+	if index < 0:
+		return "That card is missing."
+	var person := staff[index]
+	if person.hired:
+		return "%s is already here." % person.display_name
+	if cash < person.hire_cost:
+		return "Need %d cash." % person.hire_cost
+	cash -= person.hire_cost
+	person.hired = true
+	return "%s joined the office." % person.display_name
 
 
-func reject_order(deal_id: String) -> String:
-	var deal := _deal_by_id(deal_id)
-	if deal.is_empty() or str(deal["stage"]) != "offer":
-		return "That order is not waiting for an answer."
-	deal["stage"] = "closed"
-	var buyer: Person = person(str(deal["partner_id"]))
-	buyer.returns = false
-	shift_love(buyer, -1, "the order was refused")
-	_push_mail("Order", "%s was turned away. They may not come back." % buyer.display_name, "order")
-	return "%s may not come back." % buyer.display_name
+func upgrade_staff(staff_id: String) -> String:
+	var index := _staff_index(staff_id)
+	if index < 0:
+		return "That card is missing."
+	var person := staff[index]
+	if not person.hired:
+		return "Hire %s first." % person.display_name
+	if person.level >= STAFF_MAX:
+		return "%s is at the top level." % person.display_name
+	var cost := staff_upgrade_cost(person.level)
+	if cash < cost:
+		return "Need %d cash." % cost
+	cash -= cost
+	person.level += 1
+	return "%s is level %d." % [person.display_name, person.level]
 
 
-func answer_quality(deal_id: String, refund: bool) -> String:
-	var deal := _deal_by_id(deal_id)
-	if deal.is_empty() or str(deal["stage"]) != "quality":
-		return "Nobody is waiting on a quality answer."
-	var buyer: Person = person(str(deal["partner_id"]))
-	var pay := int(deal.get("pay", 0))
-	deal["stage"] = "closed"
-	if refund:
-		shift_love(buyer, -1, "the goods were refunded")
-		_push_mail("Quality", "%s got their money back. You were not paid." % buyer.display_name, "order")
-		return "Refunded %s. No payment came in." % buyer.display_name
-	var discounted := int(round(float(pay) * 0.6))
-	cash += discounted
-	week_revenue += discounted
-	lifetime_profit += discounted
-	buyer.ask += 4
-	_push_mail("Quality", "%s took a discount and paid %d." % [buyer.display_name, discounted], "order")
-	return "%s paid %d after the discount." % [buyer.display_name, discounted]
+func staff_upgrade_cost(level: int) -> int:
+	return 20 + level * 8
 
 
-func _deal_by_id(deal_id: String) -> Dictionary:
-	for deal in deals:
-		if str(deal["id"]) == deal_id:
-			return deal
-	return {}
+func upgrade_open(upgrade_id: String) -> bool:
+	match upgrade_id:
+		"faster":
+			return desk_rank < 4
+		"outbox":
+			return outbox_slots < 4
+		"phone":
+			return phone_lines < 2
+		"shelf":
+			return shelf_size < 16
+		_:
+			return false
 
 
-func _make_deal(kind: String, partner_id: String, units: int, unit_price: int, heavy: bool, stage: String = "proposal") -> void:
-	deals.append({
-		"id": "d%d" % next_deal,
-		"kind": kind,
-		"partner_id": partner_id,
-		"crew": [],
-		"stage": stage,
-		"units": units,
-		"unit_price": unit_price,
-		"heavy": heavy,
-		"pay": 0,
-	})
-	next_deal += 1
+func upgrade_cost(upgrade_id: String) -> int:
+	match upgrade_id:
+		"faster":
+			return 36 + desk_rank * 18
+		"outbox":
+			return 32
+		"phone":
+			return 40
+		"shelf":
+			return 28
+		_:
+			return 0
 
 
-func _open_order(customer: Person) -> void:
-	if not ever_hired:
+func upgrade_title(upgrade_id: String) -> String:
+	match upgrade_id:
+		"faster":
+			return "Faster desk"
+		"outbox":
+			return "Outbox slot"
+		"phone":
+			return "Second line"
+		"shelf":
+			return "Bigger shelf"
+		_:
+			return "Upgrade"
+
+
+func upgrade_label(upgrade_id: String) -> String:
+	if upgrade_open(upgrade_id):
+		return "%s  %d" % [upgrade_title(upgrade_id), upgrade_cost(upgrade_id)]
+	match upgrade_id:
+		"faster":
+			return "Desks upgraded"
+		"outbox":
+			return "Outbox ready"
+		"phone":
+			return "Both lines open"
+		"shelf":
+			return "Shelf expanded"
+		_:
+			return "Done"
+
+
+func buy_upgrade(upgrade_id: String) -> String:
+	if not upgrade_open(upgrade_id):
+		return "That is already in the room."
+	var cost := upgrade_cost(upgrade_id)
+	if cash < cost:
+		return "Need %d cash." % cost
+	cash -= cost
+	match upgrade_id:
+		"faster":
+			desk_rank += 1
+			return "The desks are faster."
+		"outbox":
+			outbox_slots += 1
+			return "The outbox has another slot."
+		"phone":
+			phone_lines += 1
+			return "A second line is open."
+		"shelf":
+			shelf_size += 4
+			return "The supply shelf is bigger."
+		_:
+			return "That upgrade is missing."
+
+
+func tick(delta: float) -> void:
+	if delta <= 0.0:
 		return
-	if not customer.returns:
+	for desk in desks:
+		if desk.phase != "cooking":
+			continue
+		desk.seconds_left -= delta
+		if desk.seconds_left <= 0.0:
+			desk.seconds_left = 0.0
+			desk.phase = "done"
+	var caller_index := callers.size() - 1
+	while caller_index >= 0:
+		var caller := callers[caller_index]
+		caller.patience -= delta
+		if caller.patience <= 0.0:
+			notice = "%s hung up unhappy." % caller.display_name
+			_set_mood("unhappy")
+			callers.remove_at(caller_index)
+		caller_index -= 1
+	if restock_left > 0.0:
+		restock_left = maxf(restock_left - delta, 0.0)
+		if restock_left == 0.0:
+			_apply_restock()
+			notice = "Supplies arrived."
+	if mood_left > 0.0:
+		mood_left = maxf(mood_left - delta, 0.0)
+		if mood_left == 0.0:
+			last_mood = ""
+	if not ambient:
 		return
-	if not customer.active or customer.love <= 0:
-		return
-	if _open_deal_for(customer.id):
-		return
-	var units := 16 + customer.love * 6
-	if customer.has_strength("large_pay"):
-		units += 18
-	if customer.has_strength("small_mention"):
-		units = 8 + customer.love * 2
-	if customer.has_strength("steady_orders"):
-		units = 22 + customer.love * 4
-	_make_deal("customer", customer.id, units, customer.ask, units >= 40, "offer")
-	_push_mail("Phone", "%s is calling for %d %s at %d each. The line is booked for %s before an employee's card shortens it. Each one uses supplier stock. Choose someone to take the call." % [customer.display_name, units, customer.goods, customer.ask, clock_text(float(customer.call_seconds))], "order")
+	spawn_wait -= delta
+	if spawn_wait <= 0.0:
+		spawn_wait = rng.randf_range(8.0, 13.0)
+		if callers.size() < phone_lines:
+			spawn_caller(_ambient_product())
+	mess_wait -= delta
+	if mess_wait <= 0.0:
+		mess_wait = 15.0
+		_maybe_mess()
 
 
-func _free_seat() -> int:
-	var used := {}
-	for p in hired_people():
-		used[p.seat] = true
-	for seat in SEAT_COUNT:
-		if not used.has(seat):
-			return seat
+func _staff_index(staff_id: String) -> int:
+	for index in staff.size():
+		if staff[index].id == staff_id:
+			return index
 	return -1
 
 
-func _applicant_card(p: Person) -> String:
-	return "%s. Level %d. %s. Strength: %s. Bad habit: %s (%s). Ask: %d." % [p.display_name, p.level, p.balance, p.gift_line(), p.habit_line(), p.severity, p.ask]
+func _complete_handoff(caller_index: int, slot: int, matched: bool) -> String:
+	var caller := callers[caller_index]
+	outbox.remove_at(slot)
+	callers.remove_at(caller_index)
+	if not matched:
+		_set_mood("unhappy")
+		return "%s hung up unhappy." % caller.display_name
+	var tip := 0
+	if allow_tips and rng.randf() < 0.28:
+		tip = 5
+	cash += caller.pay + tip
+	_set_mood("happy")
+	if tip > 0:
+		return "%s paid %d and left a %d tip." % [caller.display_name, caller.pay, tip]
+	return "%s paid %d." % [caller.display_name, caller.pay]
 
 
-func _profile(p: Person) -> String:
-	return "%s. Strength: %s. Bad habit: %s (%s)." % [p.balance, p.gift_line(), p.habit_line(), p.severity]
+func _set_mood(mood: String) -> void:
+	last_mood = mood
+	mood_left = 1.8
 
 
-func _jealousy(raised: Person) -> void:
-	var top := 0
-	for other in hired_people():
-		if other.pay > top:
-			top = other.pay
-	if raised.pay < top or raised.pay < int(float(raised.ask) * 1.15):
+func _apply_restock() -> void:
+	for supply_id in SUPPLY_ORDER:
+		var next := supply_qty(supply_id) + RESTOCK_AMOUNT
+		if next > shelf_size:
+			next = shelf_size
+		supplies[supply_id] = next
+
+
+func _ambient_product() -> String:
+	if not outbox.is_empty() and rng.randf() < 0.75:
+		return outbox[rng.randi() % outbox.size()]
+	var roll := rng.randi() % 10
+	if roll < 4:
+		return "snack"
+	if roll < 7:
+		return "lunch"
+	if roll < 8:
+		return "sample"
+	if roll < 9:
+		return "classkit"
+	return "hamper"
+
+
+func _maybe_mess() -> void:
+	if messes.size() >= 3:
 		return
-	for other in hired_people():
-		if other.id == raised.id:
-			continue
-		if other.pay * 10 < raised.pay * 7:
-			shift_love(other, -1, "the pay gap was unfair")
-
-
-func _pull_from_deals(p: Person, drop_partner: bool) -> void:
-	for deal in deals:
-		if str(deal["stage"]) == "closed":
-			continue
-		var crew: Array = deal["crew"]
-		if not crew.has(p.id):
-			continue
-		crew.erase(p.id)
-		if drop_partner and crew.is_empty():
-			_partner_abandoned(deal)
-
-
-func _partner_abandoned(deal: Dictionary) -> void:
-	if str(deal["stage"]) == "closed":
+	if rng.randf() > 0.7:
 		return
-	var partner: Person = person(str(deal["partner_id"]))
-	if partner.active:
-		shift_love(partner, -1, "nobody followed the work")
-
-
-func _open_deal_for(partner_id: String) -> bool:
-	for deal in deals:
-		if str(deal["partner_id"]) == partner_id and str(deal["stage"]) != "closed":
-			return true
-	return false
-
-
-func _deals_of_kind(kind: String) -> Array:
-	var found: Array = []
-	for deal in deals:
-		if str(deal["kind"]) == kind and str(deal["stage"]) != "closed":
-			found.append(deal)
-	return found
-
-
-func _build_habit(p: Person) -> Dictionary:
-	var fire := false
-	if forced_habits.has(p.id):
-		fire = true
-	elif suppress_habits:
-		fire = false
+	var mess := Mess.new()
+	if rng.randf() < 0.45:
+		mess.kind = "cup"
+		mess.coins = 4
 	else:
-		fire = rng.randf() < habit_chance(p.severity)
-	if not fire or p.habit == "":
-		return {}
-	var kind := p.habit
-	var late := false
-	var junk := false
-	if kind == "late_or_junk":
-		if rng.randf() < 0.5:
-			kind = "junk"
-			junk = true
-		else:
-			kind = "late"
-			late = true
-	var secret := kind == "steal"
-	var cash_hit := 0
-	if kind == "steal":
-		match p.severity:
-			"faint":
-				cash_hit = 15
-			"minor":
-				cash_hit = 60
-			"moderate":
-				cash_hit = 180
-			_:
-				cash_hit = 350
-	var label := p.severity.capitalize()
-	var verb: String = str(HABIT_TEXT.get(kind, str(HABIT_TEXT.get(p.habit, kind))))
-	var text := "%s %s. %s habit." % [p.display_name, verb, label]
-	return {
-		"actor_id": p.id,
-		"kind": kind,
-		"text": text,
-		"secret": secret,
-		"cash": cash_hit,
-		"junk": junk or kind == "junk",
-		"late": late or kind == "late",
-		"public": kind == "public_snap",
-		"refund": kind == "snap" and p.role == "customer",
-		"bailout": BAIL_AMOUNT if kind == "bankruptcy" else 0,
-	}
-
-
-func _apply_habit_side_effects() -> void:
-	var short := 0
-	var revealed: Array = []
-	for id in rolled_habits.keys():
-		var incident: Dictionary = rolled_habits[id]
-		if incident.is_empty():
-			continue
-		if int(incident["cash"]) > 0:
-			var hit := int(incident["cash"])
-			cash -= hit
-			short += hit
-		if int(incident["bailout"]) > 0 and pending_bailout.is_empty():
-			pending_bailout = {"id": str(incident["actor_id"]), "amount": int(incident["bailout"])}
-			_push_mail("Bailout", str(incident["text"]) + " Lend the company money, or refuse.", "bailout")
-		if bool(incident["public"]):
-			var settled := _solver_on_partner(str(id))
-			if not settled:
-				_issue_penalty(CONSUMER_FINE, "%s snapped in public. The consumer rule prints a penalty of %d." % [person(str(id)).display_name, CONSUMER_FINE])
-	if short > 0:
-		var named := _june_can_name()
-		if named:
-			for id in rolled_habits.keys():
-				var incident: Dictionary = rolled_habits[id]
-				if incident.is_empty() or not bool(incident["secret"]):
-					continue
-				revealed.append(str(incident["text"]))
-		if revealed.is_empty():
-			_push_mail("Drawer", "The drawer is short by %d." % short, "note")
-		else:
-			_push_mail("June's books", "June closed the books.\n" + "\n".join(revealed), "report")
-
-
-func _solver_on_partner(partner_id: String) -> bool:
-	for deal in deals:
-		if str(deal["partner_id"]) != partner_id or str(deal["stage"]) == "closed":
-			continue
-		for member_id in deal["crew"]:
-			var member: Person = person(str(member_id))
-			if member.hired and member.active and not member.training and member.has_strength("temper_solver"):
-				return true
-	return false
-
-
-func _june_can_name() -> bool:
-	var june: Person = person("june")
-	if not june.hired or not june.active or june.training:
-		return false
-	return heart_scale(june.love) >= 0.7
-
-
-func _june_reveal() -> void:
-	if not _june_can_name():
-		return
-	var lines: Array = []
-	for id in rolled_habits.keys():
-		var incident: Dictionary = rolled_habits[id]
-		if incident.is_empty() or not bool(incident["secret"]):
-			continue
-		lines.append(str(incident["text"]))
-	if lines.is_empty():
-		return
-	if _mail_has_title("June's books"):
-		return
-	_push_mail("June's books", "June closed the books.\n" + "\n".join(lines), "report")
-
-
-func _mail_has_title(title: String) -> bool:
-	for item in mail:
-		if str(item["title"]) == title and int(item["week"]) == week:
-			return true
-	return false
-
-
-func _resolve_stage(deal: Dictionary) -> void:
-	var stage_now := str(deal["stage"])
-	if stage_now == "closed" or stage_now == "offer" or stage_now == "quality" or stage_now == "on_call":
-		return
-	if str(deal["kind"]) == "customer":
-		return
-	var crew := _live_crew(deal)
-	if crew.is_empty():
-		return
-	var partner: Person = person(str(deal["partner_id"]))
-	if not partner.active:
-		deal["stage"] = "closed"
-		return
-	if str(deal["kind"]) == "customer" and not bool(deal.get("reserved", false)):
-		var need := int(deal["units"])
-		if stock < need:
-			var waiting := "Supplies for %s" % partner.display_name
-			if not _mail_has_title(waiting):
-				_push_mail(waiting, "%s is on the call. The outbox has %d and this call needs %d. The desk waits until a supplier sends the stock. You pay when it arrives." % [partner.display_name, stock, need], "order")
-			return
-		stock -= need
-		deal["reserved"] = true
-	var stage := str(deal["stage"])
-	var demand := int(deal["units"])
-	var total := 0
-	var speed := 0
-	var on_time := false
-	var solver := false
-	var inspector_scale := 0.0
-	var lines: Array = []
-	for member in crew:
-		var fin := finished_units(member, demand)
-		total += fin
-		speed += pace_rank(member)
-		if member.has_strength("on_time") or member.has_strength("deadline_ship"):
-			on_time = true
-		if member.has_strength("temper_solver"):
-			solver = true
-		if member.has_strength("catch_junk"):
-			inspector_scale = maxf(inspector_scale, heart_scale(member.love))
-		member.made += fin
-		lines.append("%s reached %d by %s." % [member.display_name, fin, pace_day(member)])
-	total = mini(total, demand)
-	var share := float(total) / float(maxi(demand, 1))
-	var avg_speed := float(speed) / float(crew.size())
-	var incident: Dictionary = rolled_habits.get(partner.id, {})
-	var settled := false
-	if not incident.is_empty() and solver and str(incident["kind"]) in ["snap", "public_snap"]:
-		settled = true
-		lines.append("%s settled %s's temper." % [_solver_name(crew), partner.display_name])
-	if not incident.is_empty() and bool(incident["junk"]):
-		if inspector_scale >= 0.5:
-			lines.append("%s caught the junk in the units they reached." % _inspector_name(crew))
-		else:
-			held_junk = true
-			lines.append("Junk got through.")
-	if not incident.is_empty() and bool(incident["late"]):
-		held_late = true
-		on_time = false
-		lines.append("The delivery missed the date.")
-	if str(deal["kind"]) == "customer" and stage == "almost":
-		if held_junk:
-			total = int(float(total) * 0.6)
-			held_junk = false
-			lines.append("Junk from the supply cut the goods.")
-		if held_late:
-			on_time = false
-			held_late = false
-			lines.append("The date slipped.")
-	var partner_delta := 0
-	var partner_reason := "the stage held"
-	if share >= 0.75 and avg_speed >= 7.0:
-		partner_delta = 1
-		partner_reason = "the stage was fast and full"
-	elif share <= 0.45 or avg_speed <= 4.0:
-		partner_delta = -1
-		partner_reason = "the stage was small and slow"
-	if not incident.is_empty() and not settled and str(incident["kind"]) in ["snap", "public_snap", "junk", "late"]:
-		partner_delta -= 1
-		partner_reason = "their habit hit the deal"
-	if str(deal["kind"]) == "supplier" and partner.has_strength("deadline_ship") and not bool(incident.get("late", false)):
-		on_time = true
-	var love_lines: Array = []
-	love_lines.append(shift_love(partner, partner_delta, partner_reason))
-	for member in crew:
-		var delta := 0
-		var reason := "the other side stayed fair"
-		if settled and member.has_strength("temper_solver"):
-			delta = 0
-			reason = "they settled the temper"
-		elif not incident.is_empty() and not settled and str(incident["kind"]) in ["snap", "public_snap", "junk", "late"]:
-			delta = -1
-			reason = "they took the snap"
-		elif partner_delta >= 0 and partner.love >= 3 and share >= 0.45:
-			delta = 1
-			reason = "a fair week from %s" % partner.display_name
-		if share < 0.45 and delta > 0:
-			delta = 0
-			reason = "the work was too thin to earn it"
-		love_lines.append(shift_love(member, delta, reason))
-	for member in crew:
-		var own: Dictionary = rolled_habits.get(member.id, {})
-		if own.is_empty():
-			continue
-		if str(own["kind"]) == "snap":
-			love_lines.append(shift_love(partner, -1, "an employee snapped"))
-		elif str(own["kind"]) == "steal" and str(deal["kind"]) == "customer":
-			love_lines.append(shift_love(partner, -1, "a payment went missing"))
-	var stage_name := _stage_name(stage)
-	if stage == "almost":
-		var bill_line := _settle_money(deal, partner, total, on_time, incident, settled)
-		if bill_line != "":
-			love_lines.append(bill_line)
-		if str(deal.get("hold", "")) == "quality":
-			deal["stage"] = "quality"
-		else:
-			deal["stage"] = "closed"
-	elif stage == "proposal":
-		deal["stage"] = "doing"
-	else:
-		deal["stage"] = "almost"
-	var writer: Person = crew[0]
-	for member in crew:
-		if member.id == "june":
-			writer = member
-	var habit_lines: Array = []
-	_append_visible_habit(habit_lines, incident, writer)
-	for member in crew:
-		_append_visible_habit(habit_lines, rolled_habits.get(member.id, {}), writer)
-	var heart_bits: Array = []
-	heart_bits.append("%s %d" % [partner.display_name, partner.love])
-	for member in crew:
-		heart_bits.append("%s %d" % [member.display_name, member.love])
-	var did := _stage_work_line(stage_name, crew, total, demand, on_time)
-	var body := "%s. %s. %s" % [stage_name, ". ".join(heart_bits), did]
-	if lines.size() > 0:
-		body += "\n" + "\n".join(lines)
-	if habit_lines.size() > 0:
-		body += "\n" + "\n".join(habit_lines)
-	body += "\n" + " ".join(love_lines)
-	_push_mail(stage_name, body, "report")
-
-
-func _live_crew(deal: Dictionary) -> Array:
-	var crew: Array = []
-	for member_id in deal["crew"]:
-		var member: Person = person(str(member_id))
-		if member.hired and member.active and not member.training:
-			crew.append(member)
-	return crew
-
-
-func _solver_name(crew: Array) -> String:
-	for member in crew:
-		if member.has_strength("temper_solver"):
-			return member.display_name
-	return "The crew"
-
-
-func _inspector_name(crew: Array) -> String:
-	for member in crew:
-		if member.has_strength("catch_junk"):
-			return member.display_name
-	return "The crew"
-
-
-func _append_visible_habit(lines: Array, incident: Dictionary, writer: Person) -> void:
-	if incident.is_empty():
-		return
-	var actor := str(incident["actor_id"])
-	var june_writing := writer.id == "june"
-	if bool(incident["secret"]) and actor == writer.id and not june_writing:
-		return
-	var text := str(incident["text"])
-	if not lines.has(text):
-		lines.append(text)
-
-
-func _stage_name(stage: String) -> String:
-	match stage:
-		"proposal":
-			return "On the call"
-		"doing":
-			return "At the desk"
-		_:
-			return "Ready to send"
-
-
-func _stage_work_line(stage_name: String, crew: Array, total: int, demand: int, on_time: bool) -> String:
-	var lead: Person = crew[0]
-	var when := pace_day(lead)
-	for member in crew:
-		if pace_rank(member) > pace_rank(lead):
-			lead = member
-			when = pace_day(member)
-	if stage_name == "On the call":
-		var cover := "most of the call" if float(total) / float(maxi(demand, 1)) >= 0.75 else "a thin slice of the call"
-		return "%s picked up the work by %s. The opening covers %s." % [lead.display_name, when, cover]
-	var date := " The finished goods hit the date." if on_time else " The date is open."
-	return "%s checked %d of %d by %s.%s" % [lead.display_name, total, demand, when, date]
-
-
-func _settle_money(deal: Dictionary, partner: Person, total: int, on_time: bool, incident: Dictionary, settled: bool) -> String:
-	if str(deal["kind"]) == "customer":
-		var units := total
-		var complain := held_junk
-		if not incident.is_empty() and (bool(incident["refund"]) or bool(incident["junk"])) and not settled:
-			complain = true
-			units = int(float(units) * 0.5)
-		if not on_time:
-			units = int(float(units) * 0.85)
-		var revenue := int(round(float(units * int(deal["unit_price"])) * (0.75 + 0.08 * float(partner.love))))
-		if complain:
-			deal["hold"] = "quality"
-			deal["pay"] = revenue
-			return "%s dislikes the quality. Choose a refund or a discount before any cash comes in." % partner.display_name
-		cash += revenue
-		week_revenue += revenue
-		lifetime_profit += revenue
-		partner.ask += 6
-		return "%s accepted the goods and paid %d. They may return at a higher price." % [partner.display_name, revenue]
-	var arrived := maxi(total, 0)
-	add_ingredient(partner.id, arrived)
-	var cost := int(deal["units"]) * int(deal["unit_price"])
-	if cash >= cost:
-		cash -= cost
-		week_supplier += cost
-		return ""
-	week_supplier += maxi(cash, 0)
-	cash = 0
-	if credit > 0:
-		credit -= 1
-		_recompute_rate(true)
-	return shift_love(partner, -1, "the bill was short")
-
-
-func _pay_wages() -> void:
-	var due := 0
-	for p in hired_people():
-		due += p.pay
-	week_wages = due
-	if due <= 0:
-		return
-	if cash >= due:
-		cash -= due
-		return
-	cash -= due
-	for p in hired_people():
-		shift_love(p, -1, "payroll was late")
-	if credit > 0:
-		credit -= 1
-		_recompute_rate(true)
-	_push_mail("Payroll", "Payroll was short. Love fell in the room.", "note")
-
-
-func _pay_tax() -> void:
-	var profit := week_revenue - week_wages - week_supplier - week_training - week_interest
-	if profit <= 0:
-		return
-	var tax := int(round(float(profit) * tax_rate))
-	if tax <= 0:
-		return
-	if cash >= tax:
-		cash -= tax
-	else:
-		_issue_penalty(tax, "Tax of %d on the week's profit was not paid." % tax)
-
-
-func _pay_interest() -> void:
-	if debt <= 0:
-		return
-	var due := int(round(float(debt) * rate / 8.0))
-	week_interest = due
-	if due <= 0:
-		return
-	if cash >= due:
-		cash -= due
-	else:
-		debt += due
-		if credit > 0:
-			credit -= 1
-			_recompute_rate(true)
-		_push_mail("Bank", "Interest of %d was added to the loan. The rate on the sign is %s." % [due, rate_text()], "rate")
-
-
-func _tick_subsidies() -> void:
-	for p in hired_people():
-		if p.subsidy_weeks > 0:
-			p.subsidy_weeks -= 1
-
-
-func _law_check() -> void:
-	var under: Array = []
-	for p in hired_people():
-		if p.pay < min_wage:
-			under.append("%s is paid %d" % [p.display_name, p.pay])
-	if under.size() > 0:
-		_issue_penalty(WAGE_FINE, "Wage floor is %d. %s." % [min_wage, "; ".join(under)])
-	elif wage_raised and not floor_feelings_applied:
-		floor_feelings_applied = true
-		for p in hired_people():
-			if p.junior and p.pay >= min_wage and p.pay <= min_wage + 30:
-				shift_love(p, 1, "the wage floor reached them")
-			elif not p.junior and p.pay < min_wage + 120:
-				shift_love(p, -1, "the gap over the new floor got smaller")
-	if penalty_unpaid > 0:
-		unpaid_weeks += 1
-		if unpaid_weeks >= 2:
-			_lose("A government note ordered the doors shut. The printed penalties stayed unpaid.")
-			_push_mail("Government note", _rules_note(loss_reason), "government")
-	else:
-		unpaid_weeks = 0
-
-
-func _issue_penalty(amount: int, fact: String) -> void:
-	penalty_unpaid += amount
-	_push_mail("Government note", _rules_note("%s Penalty on the table: %d. Unpaid total: %d." % [fact, amount, penalty_unpaid]), "government")
-
-
-func _rules_note(fact: String) -> String:
-	return "Rule, from the newspaper.\n%s" % fact
-
-
-func _credit_tick() -> void:
-	var payroll_ok := week_wages <= 0 or cash >= 0
-	if payroll_ok and hired_people().size() > 0:
-		credit_buffer += 1
-	var auntie: Person = person("auntie")
-	if auntie.active and auntie.love >= 3:
-		credit_buffer += 1
-	if week_supplier > 0 and cash >= 0:
-		credit_buffer += 1
-	if penalty_unpaid > 0 or cash < 0:
-		credit_buffer -= 2
-	if credit_buffer >= 3 and credit < 5:
-		credit += 1
-		credit_buffer = 0
-		_recompute_rate(true)
-	elif credit_buffer <= -2 and credit > 0:
-		credit -= 1
-		credit_buffer = 0
-		_recompute_rate(true)
-
-
-func _ledger() -> void:
-	var profit := week_revenue - week_wages - week_supplier - week_training - week_interest
-	lifetime_profit += profit - week_revenue
-	_push_mail("Ledger", "Calls paid: %d\nSuppliers: %d\nWages: %d\nTraining: %d\nInterest: %d\nUnpaid penalties: %d\nDebt: %d\nReady: %d\nCash now: %d" % [week_revenue, week_supplier, week_wages, week_training, week_interest, penalty_unpaid, debt, stock, cash], "ledger")
-
-
-func best_worker_name() -> String:
-	var best: Person = null
-	for p in hired_people():
-		if best == null or p.made > best.made:
-			best = p
-	if best == null or best.made <= 0:
-		return ""
-	return best.display_name
-
-
-func _check_endings() -> void:
-	if cash < 0 and credit <= 0 and debt > 0:
-		_lose("Credit is broken and cash is below zero. The bank called the loan.")
-	if ever_hired and hired_people().is_empty() and not lost:
-		_lose("Nobody is left to allocate work to.")
-	if _customers_all_gone() and not lost:
-		_lose("Every customer ended the account.")
-
-
-func _customers_all_gone() -> bool:
-	for customer in _customers():
-		if customer.active:
-			return false
-	return true
-
-
-func _customers() -> Array:
-	var found: Array = []
-	for id in people.keys():
-		var p: Person = person(str(id))
-		if p.role == "customer":
-			found.append(p)
-	return found
-
-
-func _outsiders() -> Array:
-	var found: Array = []
-	for id in people.keys():
-		var p: Person = person(str(id))
-		if p.role == "customer" or p.role == "supplier":
-			found.append(p)
-	return found
-
-
-func _lose(reason: String) -> void:
-	if lost:
-		return
-	lost = true
-	loss_reason = reason
-	_push_mail("U r fired", reason, "end")
-
-
-func _begin_week() -> void:
-	week_training = 0
-	if week == 4 and not wage_raised:
-		wage_raised = true
-		floor_feelings_applied = false
-		min_wage = WAGE_RAISED
-		policy_blurb = "Week 4. The wage floor is now %d. Pay under it is a %d penalty, printed here." % [min_wage, WAGE_FINE]
-		_push_mail("Government note", _rules_note("The wage floor rose to %d. Juniors who receive it will feel it. Seniors feel it when the gap over the floor shrinks and their pay does not. Comply from the newspaper, or the penalty table applies." % min_wage), "government")
-	elif week == 6 and not subsidy_open and not subsidy_used:
-		subsidy_open = true
-		policy_blurb = "Week 6. A hiring subsidy is open."
-		_push_mail("Government note", _rules_note("The company qualifies for a hiring subsidy of %d. The new hire must stay %d weeks. Firing them early returns the grant plus %d." % [SUBSIDY_GRANT, SUBSIDY_LOCK, SUBSIDY_PENALTY]), "government")
-	if rng.randf() < 0.35:
-		market_jitter = 0.005 if rng.randf() < 0.5 else -0.005
-		_recompute_rate(true)
-	if week == 2:
-		_open_order(person("lau"))
-	elif week == 3:
-		_open_order(person("influencer"))
-	if week == 4:
-		_open_order(person("cafe"))
-	elif week == 5:
-		_open_order(person("school"))
-	if week > 3:
-		for customer in _customers():
-			if customer.active and not _open_deal_for(customer.id) and rng.randf() < 0.45:
-				_open_order(customer)
-	if not hidden_applicants.is_empty() and rng.randf() < 0.4:
-		look_for_applicant()
-	if week > SEASON_WEEKS and not season_checked and not lost:
-		season_checked = true
-		var hearts_ok := true
-		for p in active_people():
-			if p.love < 1 and p.role != "employee":
-				hearts_ok = false
-			if p.role == "employee" and p.hired and p.love < 1:
-				hearts_ok = false
-		if cash > 0 and hired_people().size() > 0 and hearts_ok:
-			season_held = true
-			_push_mail("Season", "The season holds. Cash is above zero, the chairs are filled, and every active person still has a heart.", "end")
-
-
-func _recompute_rate(announce: bool) -> void:
-	var old := rate
-	var size_cut := 0.0
-	if debt >= 3000:
-		size_cut = 0.03
-	elif debt >= 1500:
-		size_cut = 0.015
-	rate = clampf(0.10 - size_cut - float(credit) * 0.008 + market_jitter, 0.03, 0.16)
-	if announce and not is_equal_approx(old, rate):
-		_push_mail("Bank", "The interest rate changed. The sign now reads %s." % rate_text(), "rate")
-
-
-func _push_mail(title: String, body: String, kind: String) -> void:
-	mail.append({
-		"id": next_mail,
-		"week": week,
-		"title": title,
-		"body": body,
-		"read": false,
-		"kind": kind,
-	})
-	next_mail += 1
-
-
-func mark_mail_read() -> void:
-	for item in mail:
-		item["read"] = true
+		mess.kind = "papers"
+		mess.coins = 3
+	messes.append(mess)

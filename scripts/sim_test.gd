@@ -1,21 +1,17 @@
 extends SceneTree
 
-## Headless checks for love, training, deals, and the government.
+## Headless checks for the real-time desk, outbox, and phone loop.
 
 var failed := 0
 
 
 func _init() -> void:
-	_check_tracks()
-	_check_training_dice()
-	_check_training_steps()
-	_check_habit_ignores_love()
-	_check_offers()
-	_check_deals_and_reports()
-	_check_direct_sale()
-	_check_training_abandons_deal()
-	_check_wage_floor()
-	_check_cast_and_government()
+	_check_job_spends_and_reaches_outbox()
+	_check_caller_pays_only_for_the_product()
+	_check_harder_caller()
+	_check_upgrade_shortens_next_job()
+	_check_staff_shortens_desk()
+	_check_restock_arrives_later()
 	if failed > 0:
 		print("FAILED %d" % failed)
 		quit(1)
@@ -32,213 +28,135 @@ func _ok(cond: bool, message: String) -> void:
 		print("FAIL ", message)
 
 
-func _fresh(seed_value: int = 1) -> GameState:
-	var game := GameState.new(seed_value)
+func _fresh() -> GameState:
+	var game := GameState.new()
 	game.setup_new_game()
-	game.suppress_habits = true
+	game.ambient = false
+	game.allow_tips = false
 	return game
 
 
-func _mail_blob(game: GameState) -> String:
-	var blob := ""
-	for item in game.mail:
-		blob += str(item["title"]) + "\n" + str(item["body"]) + "\n"
-	return blob
-
-
-func _deal_for(game: GameState, partner_id: String) -> Dictionary:
-	for deal in game.open_deals():
-		if str(deal["partner_id"]) == partner_id:
-			return deal
-	return {}
-
-
-func _check_tracks() -> void:
+func _check_job_spends_and_reaches_outbox() -> void:
 	var game := _fresh()
-	var mina := game.person("mina")
-	mina.love = 5
-	var fast: int = game.finished_units(mina, 100)
-	var fast_rank: int = game.pace_rank(mina)
-	mina.love = 1
-	var slow: int = game.finished_units(mina, 100)
-	var slow_rank: int = game.pace_rank(mina)
-	_ok(game.heart_scale(5) > game.heart_scale(1), "high love scales above low love")
-	_ok(fast > slow, "high love finishes more units")
-	_ok(fast_rank > slow_rank, "high love is faster")
-	_ok(game.pace_day(mina) != "", "pace has a day")
+	var sheets := game.supply_qty("sheets")
+	var clips := game.supply_qty("clips")
+	var cash_before := game.cash
+	var cost := game.product_cost("snack")
+	game.supplies["clips"] = 0
+	var blocked := game.start_job(0, "snack")
+	_ok(game.supply_qty("sheets") == sheets and game.cash == cash_before and game.desks[0].phase == "idle", "a missing supply spends nothing")
+	_ok(blocked.contains("Clips"), "the missing supply is named")
+	game.supplies["clips"] = clips
+	var started := game.start_job(0, "snack")
+	_ok(started.contains("Snack"), "the desk starts a snack box")
+	_ok(game.supply_qty("sheets") == sheets - 1, "a snack box spends a card sheet")
+	_ok(game.supply_qty("clips") == clips - 1, "a snack box spends a clip")
+	_ok(game.cash == cash_before - cost, "a snack box spends cash")
+	var board := game.supply_qty("board")
+	var cloth := game.supply_qty("cloth")
+	var after_snack := game.cash
+	game.start_job(1, "hamper")
+	_ok(game.supply_qty("board") == board - 1 and game.supply_qty("cloth") == cloth - 1, "a gift hamper spends board and cloth")
+	_ok(game.cash == after_snack - game.product_cost("hamper"), "a gift hamper spends its own cash")
+	var snack_left := game.desks[0].seconds_left
+	game.tick(snack_left)
+	_ok(game.desks[0].phase == "done", "the desk finishes the snack box")
+	_ok(game.desks[1].phase == "cooking", "the other desk keeps its own job")
+	_ok(game.outbox.is_empty(), "a finished job waits on the desk")
+	var placed := game.place_on_outbox(0)
+	_ok(game.outbox.size() == 1 and game.outbox[0] == "snack", "placing the finished job puts it in the outbox")
+	_ok(placed.contains("outbox") and game.desks[0].phase == "idle", "the desk is free after the outbox takes the job")
+	game.outbox.append("lunch")
+	game.desks[0].phase = "done"
+	game.desks[0].product_id = "sample"
+	var full := game.place_on_outbox(0)
+	_ok(game.outbox.size() == 2 and full.contains("full") and game.desks[0].phase == "done", "a full outbox keeps the finished job on the desk")
 
 
-func _check_training_dice() -> void:
-	var saw_all := false
-	var saw_none := false
-	for seed_value in 200:
-		var game := GameState.new(seed_value)
-		var rolls: Array = game.roll_training_dice()
-		if rolls == [true, true, true]:
-			saw_all = true
-		if rolls == [false, false, false]:
-			saw_none = true
-	_ok(saw_all, "training can improve every track")
-	_ok(saw_none, "training can improve nothing")
-
-
-func _check_training_steps() -> void:
+func _check_caller_pays_only_for_the_product() -> void:
 	var game := _fresh()
-	var mina := game.person("mina")
-	mina.severity = "serious"
-	mina.base_workload = 3
-	mina.base_pace = 3
-	game.apply_training(mina, [true, true, true])
-	_ok(mina.severity == "moderate", "temper softens one step")
-	_ok(mina.base_workload == 4, "workload rises one step")
-	_ok(mina.base_pace == 4, "pace rises one step")
-	var before_severity := mina.severity
-	var before_load := mina.base_workload
-	var before_pace := mina.base_pace
-	game.apply_training(mina, [false, false, false])
-	_ok(mina.severity == before_severity and mina.base_workload == before_load and mina.base_pace == before_pace, "a failed course changes nothing")
-	mina.severity = "faint"
-	mina.base_workload = 6
-	mina.base_pace = 6
-	game.apply_training(mina, [true, true, true])
-	_ok(mina.severity == "faint" and mina.base_workload == 6 and mina.base_pace == 6, "tracks stop at the top step")
+	game.outbox.append("snack")
+	game.spawn_caller("lunch")
+	var cash_before := game.cash
+	var missed := game.hand_over(0)
+	_ok(game.cash == cash_before and game.callers.size() == 1, "a caller pays nothing until their product is handed over")
+	_ok(missed.contains("Lunch") and game.outbox.has("snack"), "the other product stays on the outbox")
+	var wrong := game.hand_outbox_slot(0)
+	_ok(game.cash == cash_before and game.callers.is_empty() and game.outbox.is_empty(), "the wrong product pays nothing")
+	_ok(wrong.contains("unhappy"), "the wrong handoff hangs up unhappy")
+	game.outbox.append("lunch")
+	game.spawn_caller("lunch")
+	var pay := game.product_pay("lunch")
+	var paid := game.hand_over(0)
+	_ok(game.cash == cash_before + pay and paid.contains(str(pay)), "the caller pays when that product is handed over")
+	_ok(game.callers.is_empty() and not game.outbox.has("lunch"), "the handed product leaves the outbox")
+	game.spawn_caller("snack")
+	var waiting := game.callers[0].patience
+	game.tick(waiting)
+	_ok(game.callers.is_empty() and game.cash == cash_before + pay, "a caller who runs out of patience pays nothing")
 
 
-func _check_habit_ignores_love() -> void:
+func _check_harder_caller() -> void:
 	var game := _fresh()
-	var otto := game.person("otto")
-	otto.love = 5
-	game.forced_habits[otto.id] = true
-	var incident: Dictionary = game._build_habit(otto)
-	_ok(not incident.is_empty() and str(incident["kind"]) == "steal", "a serious habit can fire at love 5")
-	otto.love = 1
-	incident = game._build_habit(otto)
-	_ok(str(incident["kind"]) == "steal", "the same habit can fire at love 1")
+	_ok(game.product_patience("hamper") < game.product_patience("snack"), "a harder caller waits less")
+	_ok(game.product_pay("hamper") > game.product_pay("snack"), "a harder caller pays more")
+	game.phone_lines = 2
+	game.spawn_caller("hamper")
+	game.spawn_caller("snack")
+	_ok(game.callers[0].patience < game.callers[1].patience, "the hamper caller is given less time")
+	_ok(game.callers[0].pay > game.callers[1].pay, "the hamper caller is worth more cash")
+	game.phone_lines = 1
+	game.callers.clear()
+	game.spawn_caller("snack")
+	var blocked := game.spawn_caller("lunch")
+	_ok(game.callers.size() == 1 and blocked.contains("full"), "one phone line holds one caller")
+	game.cash = 80
+	game.buy_upgrade("phone")
+	game.spawn_caller("lunch")
+	_ok(game.phone_lines == 2 and game.callers.size() == 2, "a second line lets another caller wait")
 
 
-func _check_offers() -> void:
+func _check_upgrade_shortens_next_job() -> void:
 	var game := _fresh()
-	game.look_for_applicant()
-	game.look_for_applicant()
-	var rejected: String = game.recruit_offer("june", 300)
-	_ok(not game.person("june").hired and rejected.contains("rejected"), "a low salary can be rejected")
-	var hired: String = game.recruit_offer("june", 330)
-	_ok(game.person("june").hired and game.person("june").love == 1, "a salary under the ask can be accepted at love 1")
-	_ok(hired.contains("minor flaw"), "the hire shows the balance")
-	game = _fresh()
-	game.look_for_applicant()
-	game.look_for_applicant()
-	var thinking: String = game.recruit_offer("june", 410)
-	_ok(thinking.contains("think") and not game.person("june").hired, "a near offer can wait")
-	game.insist("june")
-	_ok(game.person("june").hired and game.person("june").love == 2, "insisting hires at low love")
-	game = _fresh()
-	var blocked: String = game.recruit_offer("mina", 100)
-	_ok(not game.person("mina").hired and blocked.contains("wage floor"), "pay under the floor does not hire")
-	var sat: String = game.recruit_offer("mina", 480)
-	_ok(game.person("mina").seat >= 0 and sat.contains("sat"), "an accepted hire takes a chair")
-	var cheap: String = game.supplier_offer("cheap", 13)
-	_ok(game.person("cheap").love == 1 and cheap.contains("love 1"), "a low supplier price can be accepted at low love")
+	var before := game.job_seconds("snack")
+	game.cash = 200
+	var cash_before := game.cash
+	var bought := game.buy_upgrade("faster")
+	_ok(game.cash < cash_before and bought.contains("faster"), "an upgrade spends cash")
+	var after := game.job_seconds("snack")
+	_ok(after < before, "an upgrade shortens the next job")
+	game.start_job(0, "snack")
+	_ok(game.desks[0].seconds_full < before and is_equal_approx(game.desks[0].seconds_full, after), "the job started after the upgrade uses the shorter time")
 
 
-func _check_deals_and_reports() -> void:
+func _check_staff_shortens_desk() -> void:
 	var game := _fresh()
-	game.end_week()
-	_ok(not _mail_blob(game).contains("On the call."), "a deal with nobody on it waits")
-	game = _fresh()
-	_ok(game.person("mina").level == 74 and game.person("otto").level == 58 and game.person("priya").level == 81, "employees start on different cards")
-	_ok(game.person("lau").call_seconds > game.person("auntie").call_seconds and game.person("auntie").call_seconds > game.person("cafe").call_seconds, "harder customers book a longer call")
-	game.recruit_offer("mina", 480)
-	var deal := _deal_for(game, "auntie")
-	_ok(not deal.is_empty(), "Auntie Shop's order is on the sign")
-	var units := int(deal["units"])
-	var bare: String = game.accept_order(str(deal["id"]), "")
-	_ok(bare.contains("employee") and str(deal["stage"]) == "offer", "a call needs an employee")
-	var short: String = game.accept_order(str(deal["id"]), "mina")
-	_ok(short.contains("Need") and str(deal["stage"]) == "offer", "a call needs supplier inventory")
-	game.add_ingredient("steady", units)
-	var started: String = game.accept_order(str(deal["id"]), "mina")
-	_ok(str(deal["stage"]) == "on_call" and started.contains("Mina") and game.ingredient_qty("steady") == 0, "the employee takes the stock onto the call")
-	var booked := float(deal["seconds_left"])
-	_ok(booked >= 60.0 and booked < float(game.person("auntie").call_seconds), "the call shows minutes and seconds")
-	game.tick_calls(booked - 1.0)
-	_ok(str(deal["stage"]) == "on_call", "the line stays up until the clock ends")
-	var paid: String = game.tick_calls(2.0)
-	_ok(str(deal["stage"]) == "closed" and paid.contains("Auntie Shop") and paid.contains("Mina"), "the finished call names both sides")
-	_ok(paid.contains("Auntie Shop ") and paid.contains("Mina "), "the report lists their love")
-	game.cash = 5000
-	var before_level: int = game.person("mina").level
-	var raised: String = game.upgrade_employee("mina")
-	_ok(game.person("mina").level == before_level + 1 and raised.contains(str(before_level + 1)), "a card can be upgraded")
+	var before := game.job_seconds("snack")
+	game.cash = 300
+	var hired := game.hire("otto")
+	_ok(game.staff[game._staff_index("otto")].hired and hired.contains("Otto"), "Otto can be hired with cash")
+	var with_staff := game.job_seconds("snack")
+	_ok(with_staff < before, "a hired person shortens desk time")
+	var cash_before := game.cash
+	var raised := game.upgrade_staff("otto")
+	_ok(game.cash < cash_before and game.staff[game._staff_index("otto")].level == 2, "a card upgrade spends cash and raises the level")
+	_ok(game.job_seconds("snack") < with_staff and raised.contains("2"), "a higher card makes the next job faster")
 
 
-func _check_direct_sale() -> void:
+func _check_restock_arrives_later() -> void:
 	var game := _fresh()
-	game.recruit_offer("mina", 480)
-	var deal := _deal_for(game, "auntie")
-	var units := int(deal["units"])
-	var price := int(deal["unit_price"])
-	var before: int = game.cash
-	var ceiling := game.order_ceiling(game.person("auntie"))
-	var high: String = game.sell_to_order(str(deal["id"]), ceiling + 5)
-	_ok(high.contains("pay up to") and str(deal["stage"]) == "offer", "a high price stays on the order")
-	game.add_ingredient("steady", units - 1)
-	var short: String = game.sell_to_order(str(deal["id"]), price)
-	_ok(short.contains("Inventory") and game.ingredient_qty("steady") == units - 1, "a short inventory does not sell")
-	game.add_ingredient("steady", 1)
-	var sold: String = game.sell_to_order(str(deal["id"]), price)
-	_ok(str(deal["stage"]) == "closed" and game.ingredient_qty("steady") == 0 and game.cash == before + units * price, "an accepted price sells the inventory")
-	_ok(sold.contains("accepted"), "the order accepted the price")
-	var packed := _fresh()
-	packed.recruit_offer("mina", 480)
-	var open_deal := _deal_for(packed, "auntie")
-	var packed_units := int(open_deal["units"])
-	open_deal["reserved"] = true
-	open_deal["stage"] = "doing"
-	packed.stock = 3
-	var cash_before: int = packed.cash
-	var from_pack: String = packed.sell_to_order(str(open_deal["id"]), int(open_deal["unit_price"]))
-	_ok(packed.stock == 3 and packed.cash == cash_before + packed_units * int(open_deal["unit_price"]) and from_pack.contains("accepted"), "packed parts are not taken twice")
-	game.visible_applicants.append("rosa")
-	game.recruit_offer("rosa", 440)
-	_ok(game.person("rosa").hired and game.hired_people().size() == 2, "a later hire can be chosen")
-
-
-func _check_training_abandons_deal() -> void:
-	var game := _fresh()
-	game.recruit_offer("mina", 480)
-	var deal := _deal_for(game, "auntie")
-	game.assign("mina", str(deal["id"]), true)
-	var before: int = game.person("auntie").love
-	var message: String = game.train("mina")
-	_ok(game.person("mina").training and message.contains("no work"), "training takes the period off the job")
-	_ok(game.person("auntie").love == before - 1, "the last person leaving a deal drops the partner's love")
-	_ok(not (deal["crew"] as Array).has("mina"), "a training employee is off the deal")
-
-
-func _check_wage_floor() -> void:
-	var game := _fresh()
-	game.week = 3
-	game.end_week()
-	var blob := _mail_blob(game)
-	_ok(game.week == 4 and game.min_wage == 320, "the wage floor rises in week 4")
-	_ok(blob.contains("wage floor") or blob.contains("Wage floor"), "a government note announces the floor")
-	_ok(game.newspaper_text().contains("320"), "the newspaper shows the new floor")
-	_ok(game.newspaper_text().contains("Penalty table"), "the newspaper keeps the penalty table")
-
-
-func _check_cast_and_government() -> void:
-	var game := _fresh()
-	_ok(game.person("mina").balance == "great strength, minor flaw", "Mina is a great strength with a minor flaw")
-	_ok(game.person("otto").balance == "thin strength, serious flaw", "Otto is a thin strength with a serious flaw")
-	_ok(game.person("ben").balance == "mixed", "Ben is mixed")
-	_ok(game.person("auntie").balance.begins_with("great"), "Auntie Shop is marked")
-	_ok(game.person("cheap").habit == "late_or_junk", "Cheap Parts can be late or junk")
-	_ok(game.person("steady").has_strength("deadline_ship"), "Steady Supply meets deadlines")
-	var government := false
-	for id in game.people.keys():
-		if game.person(str(id)).role == "government":
-			government = true
-	_ok(not government, "the government is not a person with love")
-	_ok(game.newspaper_text().contains("does not keep a heart score"), "the paper says the government has no hearts")
-	_ok(game.hired_people().is_empty(), "the office starts with empty desks")
+	var sheets := game.supply_qty("sheets")
+	game.cash = 40
+	var cash_before := game.cash
+	game.order_restock()
+	_ok(game.cash == cash_before - GameState.RESTOCK_COST, "a restock spends cash")
+	_ok(game.supply_qty("sheets") == sheets, "supplies stay put until the delivery")
+	game.tick(0.2)
+	_ok(game.supply_qty("sheets") == sheets, "the delivery is still on the way")
+	game.tick(GameState.RESTOCK_SECONDS)
+	_ok(game.supply_qty("sheets") == sheets + GameState.RESTOCK_AMOUNT, "supplies arrive after the wait")
+	var coins := game.cash
+	game.messes.append(GameState.Mess.new())
+	game.messes[0].coins = 3
+	var cleaned := game.clean_mess(0)
+	_ok(game.messes.is_empty() and game.cash == coins + 3 and cleaned.contains("3"), "cleaning a mess pays a little cash")

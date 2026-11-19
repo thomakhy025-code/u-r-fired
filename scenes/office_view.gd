@@ -1,551 +1,640 @@
 class_name OfficeView
-extends SubViewportContainer
+extends Control
 
-## Cutaway office. People are simple 3D figures who sit and work.
+## The office is the whole game: desks, outbox, phone, shelf, and staff cards.
 
-signal seat_pressed(seat: int)
+const INK := Color("3a2c24")
+const CREAM := Color("f6ead8")
+const WOOD_DARK := Color("6b3e22")
+const HONEY := Color("e0b56a")
 
-const LOOKS := {
-	"mina": {"shirt": Color("2f7d72"), "hair": Color("241c18"), "skin": Color("e2b896")},
-	"june": {"shirt": Color("3d5a80"), "hair": Color("6d4030"), "skin": Color("e8c4a8")},
-	"otto": {"shirt": Color("c46a32"), "hair": Color("c4a060"), "skin": Color("dcb08a")},
-	"ben": {"shirt": Color("a33d4e"), "hair": Color("2c2622"), "skin": Color("d4a888")},
-	"rosa": {"shirt": Color("6e4d78"), "hair": Color("2a1814"), "skin": Color("e0b090")},
-	"ken": {"shirt": Color("3f6b4a"), "hair": Color("1e1a16"), "skin": Color("d8b090")},
-	"priya": {"shirt": Color("8a5a3a"), "hair": Color("1a1412"), "skin": Color("c48a62")},
-	"sam": {"shirt": Color("3d6a8a"), "hair": Color("d4b48a"), "skin": Color("efc4a4")},
-	"noor": {"shirt": Color("8a3d48"), "hair": Color("3a241c"), "skin": Color("e2b898")},
-}
-
-const TOY_LIGHT := """
-void light() {
-	float facing = dot(NORMAL, LIGHT);
-	float band = step(0.22, facing);
-	float shade = mix(0.5, 0.74, band);
-	DIFFUSE_LIGHT += ALBEDO * LIGHT_COLOR * ATTENUATION * shade;
-}
-"""
-
-var viewport: SubViewport
-var camera: Camera3D
 var game: GameState
-var seats: Array[Node3D] = []
-var director: Node3D
-var phone: Node3D
-var phone_lamp: MeshInstance3D
-var ready_boxes: Array[MeshInstance3D] = []
-var ready_label: Label3D
-var clock := 0.0
-var _toy: Shader
-var _wood_shader: Shader
-var _fade: Shader
+var name_label: Label
+var note_label: Label
+var cash_label: Label
+var desk_timers: Array[Label] = []
+var desk_recipes: Array[VBoxContainer] = []
+var desk_ready: Array[Button] = []
+var quiet_label: Label
+var mood_row: HBoxContainer
+var mood_face: MoodMark
+var mood_label: Label
+var caller_panels: Array[PanelContainer] = []
+var caller_titles: Array[Label] = []
+var caller_wants: Array[Label] = []
+var caller_times: Array[Label] = []
+var caller_fills: Array[ColorRect] = []
+var caller_faces: Array[FaceBadge] = []
+var outbox_buttons: Array[Button] = []
+var outbox_text: Array[String] = []
+var mess_row: HBoxContainer
+var mess_key := ""
+var supply_labels: Array[Label] = []
+var restock_button: Button
+var upgrade_buttons: Array[Button] = []
+var staff_cards: Array[PlayerCard] = []
+var staff_buttons: Array[Button] = []
+
+
+class MoodMark extends Control:
+	var happy := true
+
+	func _ready() -> void:
+		custom_minimum_size = Vector2(36, 36)
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	func _draw() -> void:
+		var mid := size * 0.5
+		draw_circle(mid, 16.0, Color("f2c7a4"))
+		draw_circle(mid + Vector2(-6, -3), 2.0, Color("3a2c24"))
+		draw_circle(mid + Vector2(6, -3), 2.0, Color("3a2c24"))
+		if happy:
+			draw_line(mid + Vector2(-7, 3), mid + Vector2(0, 8), Color("3a2c24"), 2.0)
+			draw_line(mid + Vector2(0, 8), mid + Vector2(7, 3), Color("3a2c24"), 2.0)
+		else:
+			draw_line(mid + Vector2(-7, 8), mid + Vector2(0, 3), Color("3a2c24"), 2.0)
+			draw_line(mid + Vector2(0, 3), mid + Vector2(7, 8), Color("3a2c24"), 2.0)
+
+
+func bind(next: GameState) -> void:
+	game = next
 
 
 func _ready() -> void:
-	stretch = true
-	mouse_filter = Control.MOUSE_FILTER_STOP
-	custom_minimum_size = Vector2(0, 460)
-	size_flags_vertical = Control.SIZE_EXPAND_FILL
-	viewport = SubViewport.new()
-	viewport.own_world_3d = true
-	viewport.transparent_bg = false
-	viewport.handle_input_locally = false
-	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	viewport.msaa_3d = Viewport.MSAA_2X
-	add_child(viewport)
-	_build_world()
-	call_deferred("_fit")
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_build()
 
 
-func _notification(what: int) -> void:
-	if what == NOTIFICATION_RESIZED:
-		_fit()
-
-
-func _fit() -> void:
-	if viewport == null:
-		return
-	var next := Vector2i(maxi(int(size.x), 2), maxi(int(size.y), 2))
-	if viewport.size != next:
-		viewport.size = next
-
-
-func bind_game(next: GameState) -> void:
-	game = next
-	sync_staff()
-
-
-func sync_staff() -> void:
+func _process(_delta: float) -> void:
 	if game == null:
 		return
-	for seat in seats.size():
-		var body: Node3D = seats[seat]
-		var sitting: GameState.Person = null
-		for person in game.hired_people():
-			if person.seat == seat:
-				sitting = person
-				break
-		if sitting == null:
-			body.visible = false
-			continue
-		body.visible = true
-		_dress(body, sitting.id)
-		var label: Label3D = body.get_node("Name")
-		label.text = "%s %d\n%s %s" % [sitting.display_name, sitting.level, game.hearts(sitting.love), _mood(sitting.love)]
+	_sync()
+
+
+func _draw() -> void:
+	draw_rect(Rect2(Vector2.ZERO, size), Color("f0b48c"))
+	var floor_y := size.y * 0.12
+	var band := 0
+	var y := floor_y
+	while y < size.y:
+		var plank := Color("c4894a") if band % 2 == 0 else Color("b67a3c")
+		draw_rect(Rect2(0, y, size.x, 26), plank)
+		y += 26
+		band += 1
+	draw_rect(Rect2(0, floor_y, size.x, 10), Color("f0c27a"))
+	var window := Rect2(size.x * 0.38, 16, size.x * 0.24, 58)
+	draw_rect(window, Color("7eb8d4"))
+	draw_rect(Rect2(window.position.x, window.position.y, window.size.x, 8), WOOD_DARK)
+	draw_rect(Rect2(window.position.x, window.position.y + window.size.y - 8, window.size.x, 8), WOOD_DARK)
+	draw_rect(Rect2(window.position.x + window.size.x * 0.5 - 4, window.position.y, 8, window.size.y), WOOD_DARK)
+	var rug := Rect2(size.x * 0.28, size.y * 0.46, size.x * 0.36, size.y * 0.16)
+	var step := 22.0
+	var row := 0
+	var rug_y := rug.position.y
+	while rug_y < rug.end.y:
+		var col := 0
+		var rug_x := rug.position.x
+		while rug_x < rug.end.x:
+			var swatch := Color("e07a55") if (row + col) % 2 == 0 else Color("f0c27a")
+			draw_rect(Rect2(rug_x, rug_y, step, step), swatch)
+			rug_x += step
+			col += 1
+		rug_y += step
+		row += 1
+	_plant(Vector2(size.x - 78, size.y * 0.58))
+	_plant(Vector2(64, size.y * 0.62))
+
+
+func _plant(at: Vector2) -> void:
+	draw_rect(Rect2(at + Vector2(-16, 8), Vector2(32, 28)), Color("c4512f"))
+	draw_circle(at + Vector2(0, -8), 26, Color("2f8f45"))
+
+
+func _build() -> void:
+	var root := VBoxContainer.new()
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.offset_left = 16
+	root.offset_top = 10
+	root.offset_right = -16
+	root.offset_bottom = -10
+	root.add_theme_constant_override("separation", 8)
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(root)
+	root.add_child(_header())
+	var room := VBoxContainer.new()
+	room.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	room.add_theme_constant_override("separation", 8)
+	room.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(room)
+	room.add_child(_stations())
+	room.add_child(_outbox_row())
+	mess_row = HBoxContainer.new()
+	mess_row.add_theme_constant_override("separation", 8)
+	mess_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	mess_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	room.add_child(mess_row)
+	var floor_space := Control.new()
+	floor_space.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	floor_space.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	room.add_child(floor_space)
+	root.add_child(_supply_row())
+	root.add_child(_upgrade_row())
+	root.add_child(_staff_row())
+
+
+func _header() -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	name_label = _label("Company", 26, INK)
+	name_label.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	row.add_child(name_label)
+	note_label = _label("Tap a desk, then the outbox, then the phone.", 16, INK)
+	note_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	note_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	note_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	row.add_child(note_label)
+	cash_label = _label("Cash 0", 26, INK)
+	cash_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	var plaque := PanelContainer.new()
+	plaque.add_theme_stylebox_override("panel", _plate(HONEY, 12))
+	plaque.add_child(cash_label)
+	row.add_child(plaque)
+	return row
+
+
+func _stations() -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	row.add_theme_constant_override("separation", 12)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for desk_index in 2:
+		row.add_child(_desk(desk_index))
+	row.add_child(_phone())
+	return row
+
+
+func _desk(desk_index: int) -> PanelContainer:
+	var panel := PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.size_flags_vertical = Control.SIZE_FILL
+	var top := Color("3faf8a") if desk_index == 0 else Color("3d8ec4")
+	panel.add_theme_stylebox_override("panel", _plate(top, 18))
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+	panel.add_child(box)
+	var title := _label("Desk %d" % [desk_index + 1], 22, INK)
+	box.add_child(title)
+	var timer := _label("", 26, INK)
+	timer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(timer)
+	desk_timers.append(timer)
+	var recipes := VBoxContainer.new()
+	recipes.add_theme_constant_override("separation", 4)
+	box.add_child(recipes)
+	desk_recipes.append(recipes)
+	for product_id in GameState.PRODUCT_ORDER:
+		var recipe := _button(game.product_name(product_id), _product_color(product_id), INK)
+		recipe.custom_minimum_size = Vector2(0, 32)
+		recipe.clip_text = true
+		recipe.set_meta("product", product_id)
+		_bind_job(recipe, desk_index, product_id)
+		recipes.add_child(recipe)
+	var ready := _button("Outbox", HONEY, INK)
+	ready.custom_minimum_size = Vector2(0, 52)
+	ready.visible = false
+	_bind_ready(ready, desk_index)
+	box.add_child(ready)
+	desk_ready.append(ready)
+	return panel
+
+
+func _phone() -> PanelContainer:
+	var panel := PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.size_flags_vertical = Control.SIZE_FILL
+	panel.custom_minimum_size = Vector2(260, 0)
+	panel.add_theme_stylebox_override("panel", _plate(Color("f0a598"), 18))
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 6)
+	panel.add_child(box)
+	box.add_child(_label("Phone", 22, INK))
+	mood_row = HBoxContainer.new()
+	mood_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	mood_row.add_theme_constant_override("separation", 8)
+	mood_row.visible = false
+	box.add_child(mood_row)
+	mood_face = MoodMark.new()
+	mood_row.add_child(mood_face)
+	mood_label = _label("", 20, INK)
+	mood_row.add_child(mood_label)
+	quiet_label = _label("The phone is quiet.", 18, INK)
+	quiet_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(quiet_label)
+	for caller_index in 2:
+		box.add_child(_caller_card(caller_index))
+	return panel
+
+
+func _caller_card(caller_index: int) -> PanelContainer:
+	var panel := PanelContainer.new()
+	panel.visible = false
+	panel.add_theme_stylebox_override("panel", _plate(Color("f3c2b4"), 14))
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 3)
+	panel.add_child(box)
+	var top := HBoxContainer.new()
+	top.add_theme_constant_override("separation", 8)
+	box.add_child(top)
+	var face := FaceBadge.for_id("nia")
+	face.custom_minimum_size = Vector2(36, 36)
+	top.add_child(face)
+	caller_faces.append(face)
+	var words := VBoxContainer.new()
+	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top.add_child(words)
+	var title := _label("Caller", 16, INK)
+	words.add_child(title)
+	caller_titles.append(title)
+	var wants := _label("Wants", 15, INK)
+	wants.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	words.add_child(wants)
+	caller_wants.append(wants)
+	var time_row := HBoxContainer.new()
+	time_row.add_theme_constant_override("separation", 8)
+	box.add_child(time_row)
+	var time := _label("0s", 18, INK)
+	time.custom_minimum_size = Vector2(52, 0)
+	time_row.add_child(time)
+	caller_times.append(time)
+	var track := ColorRect.new()
+	track.custom_minimum_size = Vector2(80, 14)
+	track.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	track.color = Color("3a2c24")
+	track.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	time_row.add_child(track)
+	var fill := ColorRect.new()
+	fill.set_anchors_preset(Control.PRESET_FULL_RECT)
+	fill.anchor_right = 1.0
+	fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	fill.color = Color("3f9a4a")
+	track.add_child(fill)
+	caller_fills.append(fill)
+	var hand := _button("Hand over", Color("e06a58"), CREAM)
+	hand.custom_minimum_size = Vector2(0, 34)
+	_bind_hand(hand, caller_index)
+	box.add_child(hand)
+	caller_panels.append(panel)
+	return panel
+
+
+func _outbox_row() -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(_label("Outbox", 20, INK))
+	for slot in 4:
+		var button := _button("Empty", Color("d7b48a"), INK)
+		button.custom_minimum_size = Vector2(150, 46)
+		button.visible = slot < 2
+		_bind_outbox(button, slot)
+		row.add_child(button)
+		outbox_buttons.append(button)
+		outbox_text.append("")
+	return row
+
+
+func _supply_row() -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for supply_id in GameState.SUPPLY_ORDER:
+		var panel := PanelContainer.new()
+		panel.add_theme_stylebox_override("panel", _plate(Color("f0c27a"), 12))
+		panel.custom_minimum_size = Vector2(120, 52)
+		var label := _label(game.supply_name(supply_id), 14, INK)
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		panel.add_child(label)
+		row.add_child(panel)
+		supply_labels.append(label)
+	restock_button = _button("Restock  %d" % GameState.RESTOCK_COST, Color("8fbf7a"), INK)
+	restock_button.custom_minimum_size = Vector2(150, 52)
+	restock_button.pressed.connect(func() -> void:
+		_say(game.order_restock())
+	)
+	row.add_child(restock_button)
+	return row
+
+
+func _upgrade_row() -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for upgrade_id in GameState.UPGRADE_ORDER:
+		var button := _button(game.upgrade_label(upgrade_id), Color("f0b060"), INK)
+		button.custom_minimum_size = Vector2(180, 44)
+		_bind_upgrade(button, upgrade_id)
+		row.add_child(button)
+		upgrade_buttons.append(button)
+	return row
+
+
+func _staff_row() -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for person in game.staff:
+		var column := HBoxContainer.new()
+		column.add_theme_constant_override("separation", 4)
+		column.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		row.add_child(column)
+		var card := PlayerCard.new()
+		card.show_staff(person)
+		column.add_child(card)
+		staff_cards.append(card)
+		var button := _button("Hire", Color("d7c4e4"), INK)
+		button.custom_minimum_size = Vector2(128, 58)
+		button.add_theme_font_size_override("font_size", 14)
+		_bind_staff(button, person.id)
+		column.add_child(button)
+		staff_buttons.append(button)
+	return row
+
+
+func _sync() -> void:
+	if game.notice != "":
+		note_label.text = game.notice
+		game.notice = ""
+	name_label.text = game.company_name
+	cash_label.text = "Cash %d" % game.cash
+	_sync_desks()
+	_sync_phone()
 	_sync_outbox()
+	_sync_messes()
+	_sync_supplies()
+	_sync_upgrades()
+	_sync_staff()
 
 
-func _gui_input(event: InputEvent) -> void:
-	if game == null or camera == null:
-		return
-	if not (event is InputEventMouseButton):
-		return
-	var click := event as InputEventMouseButton
-	if not click.pressed or click.button_index != MOUSE_BUTTON_LEFT:
-		return
-	var mouse := click.position * Vector2(viewport.size) / Vector2(maxi(size.x, 1.0), maxi(size.y, 1.0))
-	var best := -999
-	var best_distance := 80.0
-	var points := {"director": camera.unproject_position(director.global_position + Vector3(0, 1.0, 0))}
-	if phone != null:
-		points["phone"] = camera.unproject_position(phone.global_position + Vector3(0, 0.7, 0))
-	for seat in seats.size():
-		var body: Node3D = seats[seat]
-		if not body.visible:
-			continue
-		points[str(seat)] = camera.unproject_position(body.global_position + Vector3(0, 1.0, 0))
-	for key in points.keys():
-		var distance: float = (points[key] as Vector2).distance_to(mouse)
-		if distance < best_distance:
-			best_distance = distance
-			if str(key) == "director":
-				best = -1
-			elif str(key) == "phone":
-				best = -2
-			else:
-				best = int(key)
-	if best != -999:
-		seat_pressed.emit(best)
-		accept_event()
-
-
-func _process(delta: float) -> void:
-	clock += delta
-	if director != null:
-		director.position.y = sin(clock * 1.6) * 0.015
-	if game == null:
-		return
-	for person in game.hired_people():
-		if person.seat < 0 or person.seat >= seats.size():
-			continue
-		var body: Node3D = seats[person.seat]
-		var arms: Node3D = body.get_node("Arms")
-		var book: Node3D = body.get_node("Book")
-		var working: bool = person.training
-		if not working:
-			for deal in game.deals:
-				var stage := str(deal["stage"])
-				if stage == "closed" or stage == "offer" or stage == "quality":
-					continue
-				if (deal["crew"] as Array).has(person.id):
-					working = true
-					break
-		var label: Label3D = body.get_node("Name")
-		label.text = "%s %d\n%s %s" % [person.display_name, person.level, game.hearts(person.love), _mood(person.love)]
-		if person.training:
-			book.visible = true
-			arms.rotation.x = sin(clock * 1.4) * 0.08
+func _sync_desks() -> void:
+	for desk_index in game.desks.size():
+		var desk := game.desks[desk_index]
+		var timer := desk_timers[desk_index]
+		var recipes := desk_recipes[desk_index]
+		var ready := desk_ready[desk_index]
+		if desk.phase == "cooking":
+			recipes.visible = false
+			ready.visible = false
+			timer.visible = true
+			timer.text = "%s\n%s" % [game.product_name(desk.product_id), game.clock_text(desk.seconds_left)]
+		elif desk.phase == "done":
+			recipes.visible = false
+			timer.visible = false
+			ready.visible = true
+			var ready_text := "Outbox  %s" % game.product_name(desk.product_id)
+			if ready.text != ready_text:
+				ready.text = ready_text
+				_paint_button(ready, _product_color(desk.product_id), INK)
 		else:
-			book.visible = working
-			var pace := 0.7 + game.heart_scale(person.love) * 1.8 + float(person.base_pace) * 0.15
-			arms.rotation.x = sin(clock * 7.0 * pace + float(person.seat)) * 0.28
-	_ring_phone()
+			recipes.visible = true
+			ready.visible = false
+			timer.visible = true
+			timer.text = "Pick a job"
+			for child in recipes.get_children():
+				var recipe := child as Button
+				if recipe == null or not recipe.has_meta("product"):
+					continue
+				var product_id := str(recipe.get_meta("product"))
+				recipe.text = "%s   %d   %s" % [game.product_name(product_id), game.product_cost(product_id), game.clock_text(game.job_seconds(product_id))]
 
 
-func _mood(love: int) -> String:
-	if love >= 4:
-		return "glad"
-	if love >= 3:
-		return "steady"
-	if love >= 2:
-		return "cool"
-	return "upset"
-
-
-func _ring_phone() -> void:
-	if phone == null or phone_lamp == null:
-		return
-	var ringing := false
-	for deal in game.deals:
-		if str(deal["kind"]) == "customer" and str(deal["stage"]) == "offer":
-			ringing = true
-			break
-	var flash := ringing and sin(clock * 10.0) > 0.0
-	phone.position.y = 0.05 if flash else 0.0
-	_set_albedo(phone_lamp, Color("e23b3b") if flash else Color("7a3030"))
+func _sync_phone() -> void:
+	var show_mood := game.mood_left > 0.0 and game.last_mood != ""
+	mood_row.visible = show_mood
+	if show_mood:
+		var happy := game.last_mood == "happy"
+		mood_label.text = "Happy" if happy else "Unhappy"
+		if mood_face.happy != happy:
+			mood_face.happy = happy
+			mood_face.queue_redraw()
+	quiet_label.visible = game.callers.is_empty()
+	for caller_index in caller_panels.size():
+		var panel := caller_panels[caller_index]
+		if caller_index >= game.callers.size():
+			panel.visible = false
+			continue
+		panel.visible = true
+		var caller := game.callers[caller_index]
+		caller_titles[caller_index].text = caller.display_name
+		caller_wants[caller_index].text = "Wants %s" % game.product_name(caller.product_id)
+		caller_times[caller_index].text = game.clock_text(caller.patience)
+		caller_faces[caller_index].apply_id(caller.face_id)
+		var ratio := 0.0
+		if caller.patience_full > 0.0:
+			ratio = clampf(caller.patience / caller.patience_full, 0.0, 1.0)
+		var fill := caller_fills[caller_index]
+		fill.anchor_left = 0.0
+		fill.anchor_top = 0.0
+		fill.anchor_bottom = 1.0
+		fill.offset_left = 0.0
+		fill.offset_top = 0.0
+		fill.offset_bottom = 0.0
+		fill.offset_right = 0.0
+		fill.anchor_right = ratio
+		fill.color = Color("3f9a4a").lerp(Color("c4473a"), 1.0 - ratio)
 
 
 func _sync_outbox() -> void:
-	if ready_label == null:
+	for slot in outbox_buttons.size():
+		var button := outbox_buttons[slot]
+		var open := slot < game.outbox_slots
+		button.visible = open
+		if not open:
+			continue
+		var shown := "Empty"
+		var color := Color("d7b48a")
+		if slot < game.outbox.size():
+			shown = game.product_name(game.outbox[slot])
+			color = _product_color(game.outbox[slot])
+		if outbox_text[slot] == shown:
+			continue
+		outbox_text[slot] = shown
+		button.text = shown
+		_paint_button(button, color, INK)
+
+
+func _sync_messes() -> void:
+	var key := ""
+	for mess in game.messes:
+		key += mess.kind
+		key += str(mess.coins)
+		key += "|"
+	if key == mess_key:
 		return
-	ready_label.text = "Ready\n%d" % game.stock
-	var shown := 0
-	if game.stock > 0:
-		shown = clampi(int(ceil(float(game.stock) / 8.0)), 1, ready_boxes.size())
-	for i in ready_boxes.size():
-		ready_boxes[i].visible = i < shown
+	mess_key = key
+	for child in mess_row.get_children():
+		mess_row.remove_child(child)
+		child.queue_free()
+	for index in game.messes.size():
+		var mess := game.messes[index]
+		var title := "Papers  +%d" % mess.coins
+		var color := Color("f6ead8")
+		if mess.kind == "cup":
+			title = "Cup  +%d" % mess.coins
+			color = Color("d7efe8")
+		var button := _button(title, color, INK)
+		button.custom_minimum_size = Vector2(140, 40)
+		_bind_mess(button, index)
+		mess_row.add_child(button)
 
 
-func _build_world() -> void:
-	var root := Node3D.new()
-	viewport.add_child(root)
-	var env := WorldEnvironment.new()
-	var world := Environment.new()
-	world.background_mode = Environment.BG_COLOR
-	world.background_color = Color("4e94b8")
-	world.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	world.ambient_light_color = Color("f2d2b0")
-	world.ambient_light_energy = 0.24
-	world.tonemap_mode = Environment.TONE_MAPPER_ACES
-	world.tonemap_exposure = 0.84
-	world.adjustment_enabled = true
-	world.adjustment_brightness = 0.92
-	world.adjustment_contrast = 1.06
-	world.adjustment_saturation = 1.08
-	env.environment = world
-	root.add_child(env)
-	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-52, 32, 0)
-	sun.light_color = Color("ffe0b0")
-	sun.light_energy = 0.78
-	sun.shadow_enabled = true
-	sun.shadow_opacity = 0.55
-	root.add_child(sun)
-	camera = Camera3D.new()
-	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera.size = 7.6
-	camera.look_at_from_position(Vector3(9.2, 5.6, 9.2), Vector3(-0.2, 0.7, -0.1))
-	root.add_child(camera)
-
-	_box(root, Vector3(0, -0.08, 0), Vector3(13.2, 0.16, 9.0), _wood())
-	_box(root, Vector3(-0.35, 0.02, 0.15), Vector3(3.4, 0.03, 2.2), _rug())
-	_box(root, Vector3(0, 1.25, -4.48), Vector3(13.2, 2.5, 0.18), _paint(Color("e08958")))
-	_box(root, Vector3(0, 0.42, -4.36), Vector3(13.2, 0.84, 0.08), _paint(Color("f0c27a")))
-	_box(root, Vector3(-6.5, 1.25, 0), Vector3(0.18, 2.5, 9.0), _paint(Color("d97848")))
-	_box(root, Vector3(-6.38, 0.42, 0), Vector3(0.08, 0.84, 9.0), _paint(Color("f0c27a")))
-	_box(root, Vector3(2.15, 1.55, -4.34), Vector3(2.7, 1.25, 0.06), _paint(Color("7ec8e3")))
-	_box(root, Vector3(2.15, 2.22, -4.32), Vector3(2.95, 0.1, 0.1), _paint(Color("a56b3c")))
-	_box(root, Vector3(2.15, 0.88, -4.32), Vector3(2.95, 0.1, 0.1), _paint(Color("a56b3c")))
-	_box(root, Vector3(0.85, 1.55, -4.32), Vector3(0.08, 1.35, 0.1), _paint(Color("a56b3c")))
-	_box(root, Vector3(3.45, 1.55, -4.32), Vector3(0.08, 1.35, 0.1), _paint(Color("a56b3c")))
-	_plant(root, Vector3(5.15, 0, 2.85))
-	_plant(root, Vector3(-5.35, 0, 2.9))
-	_plant(root, Vector3(5.2, 0, -2.7))
-	_shelf(root, Vector3(-5.45, 0, -3.15))
-	phone = _phone(root, Vector3(4.35, 0, 2.35))
-	_outbox(root, Vector3(4.55, 0, -0.15))
-	_lamp(root, Vector3(-0.4, 2.15, 0.2))
-	_lamp(root, Vector3(2.8, 2.15, 0.2))
-
-	var director_seat := Vector3(-4.15, 0, -2.7)
-	_glass_room(root, director_seat)
-	_place_worker(root, director_seat, Color("d9b48a"))
-	director = _worker(root, Color("2f3544"), Color("3a2a22"), Color("f1c7a3"), "Director")
-	director.position = director_seat
-
-	var spots := [
-		Vector3(-2.55, 0, 1.25),
-		Vector3(1.85, 0, 1.25),
-		Vector3(-2.55, 0, -1.45),
-		Vector3(1.85, 0, -1.45),
-	]
-	var mats := [Color("3faf8a"), Color("e0a04a"), Color("3d8ec4"), Color("e06a58")]
-	for i in spots.size():
-		_place_worker(root, spots[i], mats[i])
-		var person := _worker(root, Color("5f8f78"), Color("241c18"), Color("e2b896"), "")
-		person.position = spots[i]
-		person.visible = false
-		seats.append(person)
-	sync_staff()
+func _sync_supplies() -> void:
+	for index in supply_labels.size():
+		var supply_id := GameState.SUPPLY_ORDER[index]
+		supply_labels[index].text = "%s\n%d / %d" % [game.supply_name(supply_id), game.supply_qty(supply_id), game.shelf_size]
+	if game.restock_left > 0.0:
+		restock_button.text = "Arrives  %s" % game.clock_text(game.restock_left)
+		restock_button.disabled = true
+	else:
+		restock_button.text = "Restock  %d" % GameState.RESTOCK_COST
+		restock_button.disabled = false
 
 
-func _dress(body: Node3D, id: String) -> void:
-	var look: Dictionary = LOOKS.get(id, {"shirt": Color("5f7d68"), "hair": Color("2c241c"), "skin": Color("e2b896")})
-	var shirt: Color = look["shirt"]
-	var skin: Color = look["skin"]
-	var hair: Color = look["hair"]
-	_set_albedo(body.get_node("Shirt"), shirt)
-	_set_albedo(body.get_node("Skin"), skin)
-	_set_albedo(body.get_node("Hair"), hair)
-	for arm in body.get_node("Arms").get_children():
-		_set_albedo(arm, shirt)
+func _sync_upgrades() -> void:
+	for index in upgrade_buttons.size():
+		var upgrade_id := GameState.UPGRADE_ORDER[index]
+		upgrade_buttons[index].text = game.upgrade_label(upgrade_id)
+		upgrade_buttons[index].disabled = not game.upgrade_open(upgrade_id)
 
 
-func _set_albedo(node: Node, color: Color) -> void:
-	var mesh := node as MeshInstance3D
-	if mesh == null:
-		return
-	var material := mesh.material_override as ShaderMaterial
-	if material != null:
-		material.set_shader_parameter("albedo", color)
+func _sync_staff() -> void:
+	for index in game.staff.size():
+		var person := game.staff[index]
+		staff_cards[index].refresh(person)
+		var button := staff_buttons[index]
+		if not person.hired:
+			button.text = "Hire  %d" % person.hire_cost
+			button.disabled = false
+		elif person.level >= GameState.STAFF_MAX:
+			button.text = "Level %d" % person.level
+			button.disabled = true
+		else:
+			button.text = "Upgrade  %d" % game.staff_upgrade_cost(person.level)
+			button.disabled = false
 
 
-func _place_worker(parent: Node3D, seat: Vector3, mat: Color) -> void:
-	_shadow(parent, seat + Vector3(0, 0, 0.35), Vector2(1.35, 1.15))
-	_chair(parent, seat)
-	_workstation(parent, seat + Vector3(0, 0, 0.78), mat)
+func _say(text: String) -> void:
+	if text != "" and note_label != null:
+		note_label.text = text
 
 
-func _shadow(parent: Node3D, at: Vector3, extents: Vector2) -> void:
-	_box(parent, at + Vector3(0, 0.02, 0), Vector3(extents.x, 0.015, extents.y), _glass(Color(0.28, 0.16, 0.08, 0.35)))
+func _bind_job(button: Button, desk_index: int, product_id: String) -> void:
+	button.pressed.connect(func() -> void:
+		_say(game.start_job(desk_index, product_id))
+	)
 
 
-func _chair(parent: Node3D, at: Vector3) -> void:
-	_box(parent, at + Vector3(0, 0.34, -0.02), Vector3(0.5, 0.09, 0.48), _paint(Color("c9844e")))
-	_box(parent, at + Vector3(0, 0.62, -0.24), Vector3(0.5, 0.46, 0.09), _paint(Color("b8733e")))
-	for x in [-0.19, 0.19]:
-		_box(parent, at + Vector3(x, 0.16, 0.16), Vector3(0.07, 0.32, 0.07), _paint(Color("8a542c")))
-		_box(parent, at + Vector3(x, 0.16, -0.16), Vector3(0.07, 0.32, 0.07), _paint(Color("8a542c")))
+func _bind_ready(button: Button, desk_index: int) -> void:
+	button.pressed.connect(func() -> void:
+		_say(game.place_on_outbox(desk_index))
+	)
 
 
-func _workstation(parent: Node3D, at: Vector3, mat: Color) -> void:
-	var desk := Node3D.new()
-	desk.position = at
-	parent.add_child(desk)
-	_box(desk, Vector3(0, 0.7, 0), Vector3(1.34, 0.1, 0.72), _paint(Color("a07a48")))
-	_box(desk, Vector3(0, 0.76, 0.02), Vector3(0.72, 0.025, 0.4), _paint(mat))
-	for x in [-0.54, 0.54]:
-		for z in [-0.26, 0.26]:
-			_box(desk, Vector3(x, 0.34, z), Vector3(0.08, 0.68, 0.08), _paint(Color("8d5a32")))
-	_box(desk, Vector3(0, 0.98, -0.22), Vector3(0.58, 0.36, 0.05), _paint(Color("24384a")))
-	_box(desk, Vector3(0, 0.99, -0.19), Vector3(0.48, 0.26, 0.02), _paint(Color("3f8eb0")))
-	_box(desk, Vector3(0, 0.8, -0.22), Vector3(0.08, 0.14, 0.05), _paint(Color("8d5a32")))
-	_box(desk, Vector3(0, 0.77, 0.1), Vector3(0.32, 0.025, 0.14), _paint(Color("5d6b78")))
-	_box(desk, Vector3(0.38, 0.77, 0.02), Vector3(0.18, 0.02, 0.22), _paint(Color("f4efe4")))
-	_box(desk, Vector3(-0.4, 0.78, 0.04), Vector3(0.16, 0.04, 0.18), _paint(Color("e7c9a0")))
-	var mug := MeshInstance3D.new()
-	var cup := CylinderMesh.new()
-	cup.top_radius = 0.055
-	cup.bottom_radius = 0.048
-	cup.height = 0.1
-	mug.mesh = cup
-	mug.position = Vector3(0.48, 0.82, 0.16)
-	mug.material_override = _paint(Color("f2efe6"))
-	desk.add_child(mug)
+func _bind_hand(button: Button, caller_index: int) -> void:
+	button.pressed.connect(func() -> void:
+		_say(game.hand_over(caller_index))
+	)
 
 
-func _glass_room(parent: Node3D, at: Vector3) -> void:
-	var glass := _glass(Color(0.55, 0.78, 0.74, 0.45))
-	var trim := _paint(Color("a56b3c"))
-	_box(parent, at + Vector3(0, 0.42, -0.85), Vector3(2.5, 0.84, 0.06), glass)
-	_box(parent, at + Vector3(-1.22, 0.42, 0.15), Vector3(0.06, 0.84, 1.35), glass)
-	_box(parent, at + Vector3(1.22, 0.42, 0.15), Vector3(0.06, 0.84, 1.35), glass)
-	_box(parent, at + Vector3(0, 0.86, -0.85), Vector3(2.55, 0.08, 0.08), trim)
-	for corner in [Vector3(-1.22, 0.42, -0.85), Vector3(1.22, 0.42, -0.85), Vector3(-1.22, 0.42, 0.82), Vector3(1.22, 0.42, 0.82)]:
-		_box(parent, at + corner, Vector3(0.1, 0.9, 0.1), trim)
+func _bind_outbox(button: Button, slot: int) -> void:
+	button.pressed.connect(func() -> void:
+		_say(game.hand_outbox_slot(slot))
+	)
 
 
-func _worker(parent: Node3D, shirt: Color, hair: Color, skin: Color, title: String) -> Node3D:
-	var person := Node3D.new()
-	parent.add_child(person)
-	var body := MeshInstance3D.new()
-	body.name = "Shirt"
-	var capsule := CapsuleMesh.new()
-	capsule.radius = 0.22
-	capsule.height = 0.46
-	body.mesh = capsule
-	body.position = Vector3(0, 0.58, 0)
-	body.material_override = _paint(shirt)
-	person.add_child(body)
-	var head := MeshInstance3D.new()
-	head.name = "Skin"
-	var sphere := SphereMesh.new()
-	sphere.radius = 0.28
-	sphere.height = 0.56
-	head.mesh = sphere
-	head.position = Vector3(0, 0.98, 0)
-	head.material_override = _paint(skin)
-	person.add_child(head)
-	var hair_mesh := MeshInstance3D.new()
-	hair_mesh.name = "Hair"
-	var hair_sphere := SphereMesh.new()
-	hair_sphere.radius = 0.26
-	hair_sphere.height = 0.28
-	hair_mesh.mesh = hair_sphere
-	hair_mesh.position = Vector3(0, 1.16, -0.14)
-	hair_mesh.material_override = _paint(hair)
-	person.add_child(hair_mesh)
-	for side in [-1.0, 1.0]:
-		var eye := MeshInstance3D.new()
-		var dot := SphereMesh.new()
-		dot.radius = 0.035
-		dot.height = 0.07
-		eye.mesh = dot
-		eye.position = Vector3(0.09 * side, 1.0, 0.23)
-		eye.material_override = _paint(Color("2b241c"))
-		person.add_child(eye)
-	var arms := Node3D.new()
-	arms.name = "Arms"
-	arms.position = Vector3(0, 0.68, 0.12)
-	person.add_child(arms)
-	for side in [-1.0, 1.0]:
-		var arm := MeshInstance3D.new()
-		var limb := CapsuleMesh.new()
-		limb.radius = 0.06
-		limb.height = 0.32
-		arm.mesh = limb
-		arm.position = Vector3(0.28 * side, -0.08, 0.1)
-		arm.rotation_degrees.x = 70
-		arm.material_override = _paint(shirt)
-		arms.add_child(arm)
-	var book := MeshInstance3D.new()
-	book.name = "Book"
-	var pages := BoxMesh.new()
-	pages.size = Vector3(0.22, 0.05, 0.16)
-	book.mesh = pages
-	book.position = Vector3(0, 0.78, 0.34)
-	book.material_override = _paint(Color("f4efe4"))
-	book.visible = false
-	person.add_child(book)
-	var label := Label3D.new()
-	label.name = "Name"
-	label.text = title
-	label.position = Vector3(0, 1.48, 0)
-	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.font_size = 42
-	label.pixel_size = 0.0045
-	label.modulate = Color("2c261f")
-	label.outline_size = 10
-	label.outline_modulate = Color("fffaf3")
-	label.font = ThemeDB.fallback_font
-	label.no_depth_test = true
-	person.add_child(label)
-	return person
+func _bind_upgrade(button: Button, upgrade_id: String) -> void:
+	button.pressed.connect(func() -> void:
+		_say(game.buy_upgrade(upgrade_id))
+	)
 
 
-func _phone(parent: Node3D, at: Vector3) -> Node3D:
-	var desk := Node3D.new()
-	desk.position = at
-	parent.add_child(desk)
-	_box(desk, Vector3(0, 0.62, 0), Vector3(1.15, 0.1, 0.7), _paint(Color("f2d2a8")))
-	for x in [-0.46, 0.46]:
-		for z in [-0.26, 0.26]:
-			_box(desk, Vector3(x, 0.3, z), Vector3(0.08, 0.58, 0.08), _paint(Color("c9844e")))
-	_box(desk, Vector3(0, 0.74, 0.02), Vector3(0.42, 0.08, 0.28), _paint(Color("f7f1e4")))
-	_box(desk, Vector3(-0.1, 0.86, 0.02), Vector3(0.22, 0.08, 0.1), _paint(Color("2f3544")))
-	phone_lamp = _box(desk, Vector3(0.22, 0.86, 0.08), Vector3(0.1, 0.1, 0.1), _paint(Color("7a3030")))
-	var sign := Label3D.new()
-	sign.text = "Phone"
-	sign.position = Vector3(0, 1.25, 0)
-	sign.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	sign.font_size = 48
-	sign.pixel_size = 0.004
-	sign.modulate = Color("2c261f")
-	sign.outline_size = 8
-	sign.outline_modulate = Color("fffaf3")
-	sign.font = ThemeDB.fallback_font
-	sign.no_depth_test = true
-	desk.add_child(sign)
-	return desk
+func _bind_staff(button: Button, staff_id: String) -> void:
+	button.pressed.connect(func() -> void:
+		var person_index := game._staff_index(staff_id)
+		if person_index < 0:
+			return
+		if game.staff[person_index].hired:
+			_say(game.upgrade_staff(staff_id))
+		else:
+			_say(game.hire(staff_id))
+	)
 
 
-func _outbox(parent: Node3D, at: Vector3) -> void:
-	var counter := Node3D.new()
-	counter.position = at
-	parent.add_child(counter)
-	_box(counter, Vector3(0, 0.58, 0), Vector3(1.5, 0.12, 0.7), _paint(Color("f7f1e4")))
-	_box(counter, Vector3(0, 0.28, 0), Vector3(1.4, 0.48, 0.62), _paint(Color("e06a58")))
-	var colors := [Color("3faf8a"), Color("e0a04a"), Color("3d8ec4"), Color("f2d2a8")]
-	for i in colors.size():
-		var parcel := _box(counter, Vector3(-0.48 + float(i) * 0.32, 0.78, 0.02), Vector3(0.26, 0.22, 0.26), _paint(colors[i]))
-		parcel.visible = false
-		ready_boxes.append(parcel)
-	ready_label = Label3D.new()
-	ready_label.text = "Ready\n0"
-	ready_label.position = Vector3(0, 1.25, 0)
-	ready_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	ready_label.font_size = 42
-	ready_label.pixel_size = 0.004
-	ready_label.modulate = Color("2c261f")
-	ready_label.outline_size = 8
-	ready_label.outline_modulate = Color("fffaf3")
-	ready_label.font = ThemeDB.fallback_font
-	ready_label.no_depth_test = true
-	counter.add_child(ready_label)
+func _bind_mess(button: Button, index: int) -> void:
+	button.pressed.connect(func() -> void:
+		_say(game.clean_mess(index))
+	)
 
 
-func _rug() -> ShaderMaterial:
-	var shader := Shader.new()
-	shader.code = "shader_type spatial; render_mode cull_back, specular_disabled; void fragment() { vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; float cx = step(0.5, fract(world.x * 1.1)); float cz = step(0.5, fract(world.z * 1.1)); float check = abs(cx - cz); ALBEDO = mix(vec3(0.86, 0.32, 0.28), vec3(0.96, 0.78, 0.48), check); }\n" + TOY_LIGHT
-	var material := ShaderMaterial.new()
-	material.shader = shader
-	return material
+func _product_color(product_id: String) -> Color:
+	match product_id:
+		"snack":
+			return Color("7dcea0")
+		"lunch":
+			return Color("f0c36a")
+		"sample":
+			return Color("8ec8e8")
+		"classkit":
+			return Color("c9b4e0")
+		"hamper":
+			return Color("f0a090")
+		_:
+			return HONEY
 
 
-func _plant(parent: Node3D, at: Vector3) -> void:
-	_box(parent, at + Vector3(0, 0.18, 0), Vector3(0.34, 0.36, 0.34), _paint(Color("c4512f")))
-	var puff := MeshInstance3D.new()
-	var ball := SphereMesh.new()
-	ball.radius = 0.36
-	ball.height = 0.72
-	puff.mesh = ball
-	puff.position = at + Vector3(0, 0.62, 0)
-	puff.material_override = _paint(Color("2f8f45"))
-	parent.add_child(puff)
+func _label(text: String, font_size: int, color: Color) -> Label:
+	var label := Label.new()
+	label.text = text
+	label.add_theme_font_override("font", ThemeDB.fallback_font)
+	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_color_override("font_color", color)
+	return label
 
 
-func _shelf(parent: Node3D, at: Vector3) -> void:
-	_box(parent, at + Vector3(0, 0.75, 0), Vector3(1.15, 1.5, 0.3), _paint(Color("a86b3c")))
-	_box(parent, at + Vector3(-0.24, 1.0, 0.1), Vector3(0.16, 0.46, 0.12), _paint(Color("c4494a")))
-	_box(parent, at + Vector3(0.02, 1.0, 0.1), Vector3(0.16, 0.46, 0.12), _paint(Color("2f8a78")))
-	_box(parent, at + Vector3(0.28, 0.92, 0.1), Vector3(0.14, 0.3, 0.12), _paint(Color("e0a04a")))
+func _button(text: String, color: Color, ink: Color) -> Button:
+	var button := Button.new()
+	button.text = text
+	button.focus_mode = Control.FOCUS_NONE
+	_paint_button(button, color, ink)
+	return button
 
 
-func _lamp(parent: Node3D, at: Vector3) -> void:
-	_box(parent, at, Vector3(0.08, 0.7, 0.08), _paint(Color("8a542c")))
-	_box(parent, at + Vector3(0, -0.28, 0), Vector3(0.55, 0.08, 0.55), _paint(Color("e2a84a")))
+func _paint_button(button: Button, color: Color, ink: Color) -> void:
+	button.add_theme_font_override("font", ThemeDB.fallback_font)
+	button.add_theme_font_size_override("font_size", 16)
+	button.add_theme_color_override("font_color", ink)
+	button.add_theme_color_override("font_hover_color", ink)
+	button.add_theme_color_override("font_pressed_color", ink)
+	button.add_theme_color_override("font_disabled_color", Color("6d5848"))
+	button.add_theme_stylebox_override("normal", _plate(color, 12))
+	button.add_theme_stylebox_override("hover", _plate(color.lightened(0.06), 12))
+	button.add_theme_stylebox_override("pressed", _plate(color.darkened(0.08), 12))
+	button.add_theme_stylebox_override("focus", _plate(color.lightened(0.06), 12))
+	button.add_theme_stylebox_override("disabled", _plate(color.darkened(0.18), 12))
 
 
-func _box(parent: Node3D, at: Vector3, extents: Vector3, material: Material) -> MeshInstance3D:
-	var mesh_instance := MeshInstance3D.new()
-	var box := BoxMesh.new()
-	box.size = extents
-	mesh_instance.mesh = box
-	mesh_instance.position = at
-	mesh_instance.material_override = material
-	parent.add_child(mesh_instance)
-	return mesh_instance
-
-
-func _paint(color: Color) -> ShaderMaterial:
-	var material := ShaderMaterial.new()
-	material.shader = _shared_toy()
-	material.set_shader_parameter("albedo", color)
-	return material
-
-
-func _glass(color: Color) -> ShaderMaterial:
-	if _fade == null:
-		_fade = Shader.new()
-		_fade.code = "shader_type spatial; render_mode blend_mix, depth_draw_opaque, cull_back, specular_disabled; uniform vec4 albedo : source_color = vec4(1.0); void fragment() { ALBEDO = albedo.rgb; ALPHA = albedo.a; }\n" + TOY_LIGHT
-	var material := ShaderMaterial.new()
-	material.shader = _fade
-	material.set_shader_parameter("albedo", color)
-	return material
-
-
-func _shared_toy() -> Shader:
-	if _toy != null:
-		return _toy
-	_toy = Shader.new()
-	_toy.code = "shader_type spatial; render_mode cull_back, specular_disabled; uniform vec4 albedo : source_color = vec4(1.0); void fragment() { ALBEDO = albedo.rgb; }\n" + TOY_LIGHT
-	return _toy
-
-
-func _wood() -> ShaderMaterial:
-	if _wood_shader == null:
-		_wood_shader = Shader.new()
-		_wood_shader.code = "shader_type spatial; render_mode specular_disabled; void fragment() { vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; float band = fract(world.x * 0.72); float seam = step(0.055, band); float grain = step(0.88, fract(world.z * 0.5)); vec3 plank = mix(vec3(0.55, 0.32, 0.12), vec3(0.78, 0.50, 0.20), seam); ALBEDO = mix(plank, plank * 0.86, grain); }\n" + TOY_LIGHT
-	var material := ShaderMaterial.new()
-	material.shader = _wood_shader
-	return material
+func _plate(color: Color, radius: int) -> StyleBoxFlat:
+	var box := StyleBoxFlat.new()
+	box.bg_color = color
+	box.border_color = WOOD_DARK
+	box.set_border_width_all(3)
+	box.set_corner_radius_all(radius)
+	box.content_margin_left = 8
+	box.content_margin_right = 8
+	box.content_margin_top = 6
+	box.content_margin_bottom = 6
+	return box

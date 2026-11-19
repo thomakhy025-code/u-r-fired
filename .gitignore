@@ -2,6 +2,9 @@
 office_preview.png
 office_preview.png.import
 
+# Editor sidecars for the published site icons. The png files stay tracked.
+docs/*.png.import
+
 # Godot 4 editor cache and imported binaries.
 # Sidecar *.import files and *.gd.uid files stay tracked.
 .godot/
