@@ -61,9 +61,9 @@ var phone_handset: MeshInstance3D
 var phone_ring: MeshInstance3D
 var bench_ring: MeshInstance3D
 var shelf_ring: MeshInstance3D
+var phone_name_label: Label3D
 var love_label: Label3D
 var craft_label: Label3D
-var company_label: Label3D
 var employee_ids: Array[String] = []
 var employee_rings: Array[MeshInstance3D] = []
 
@@ -164,18 +164,18 @@ func _build_world() -> void:
 	env_node.environment = env
 	world.add_child(env_node)
 	camera = Camera3D.new()
-	camera.fov = 50.0
+	camera.fov = 48.0
 	camera.near = 0.08
 	camera.far = 80.0
 	camera.current = true
 	world.add_child(camera)
-	_place_camera(Vector3(0.0, 0.7, 0.15))
+	_place_camera(Vector3(0.0, 0.65, 0.05))
 	_build_room()
 
 
 func _place_camera(target: Vector3) -> void:
 	var elevation: float = deg_to_rad(CAMERA_ELEVATION)
-	var distance: float = 13.0
+	var distance: float = 12.2
 	camera.position = target + Vector3(0.0, sin(elevation) * distance, cos(elevation) * distance)
 	camera.look_at(target, Vector3.UP)
 
@@ -195,52 +195,54 @@ func _build_room() -> void:
 	_add_box(world, Vector3(0.0, 1.42, -5.16), Vector3(3.2, 0.1, 0.08), WOOD)
 	var glass := _add_box(world, Vector3(0.0, 2.05, -5.08), Vector3(2.9, 1.15, 0.04), Color("6aa8c4"))
 	glass.material_override = _glass_mat()
-	_plant(Vector3(-6.7, 0.0, -3.7))
-	_plant(Vector3(6.9, 0.0, 1.7))
-	company_label = _tag(world, "Company", Vector3(0.0, 2.15, -5.12), 56, INK)
+	_plant(Vector3(-7.1, 0.0, -3.4))
+	_plant(Vector3(7.1, 0.0, -3.2))
 
 
 func _build_actors() -> void:
 	var spots: Array[Vector3] = [
-		Vector3(-4.4, 0.0, -1.15),
-		Vector3(-1.5, 0.0, -1.15),
-		Vector3(1.5, 0.0, -1.15),
-		Vector3(4.4, 0.0, -1.15),
+		Vector3(-3.15, 0.0, -0.85),
+		Vector3(-1.05, 0.0, -0.85),
+		Vector3(1.05, 0.0, -0.85),
+		Vector3(3.15, 0.0, -0.85),
 	]
 	var index: int = 0
 	while index < game.employees.size() and index < spots.size():
 		var person: GameState.Employee = game.employees[index]
 		_build_employee(person, spots[index])
 		index += 1
-	_build_phone(Vector3(-5.7, 0.0, 0.35))
-	_build_bench(Vector3(0.3, 0.0, 1.7))
-	_build_shelf(Vector3(6.15, 0.0, -2.35))
+	_build_phone(Vector3(-5.85, 0.0, 0.15))
+	_build_bench(Vector3(0.0, 0.0, 1.15))
+	_build_shelf(Vector3(5.85, 0.0, 0.15))
 
 
 func _build_employee(person: GameState.Employee, pos: Vector3) -> void:
-	var body := _station("employee", person.id, pos, Vector3(2.05, 1.9, 2.15), Vector3(0.0, 0.95, 0.45))
-	var ring := _add_box(body, Vector3(0.0, 0.05, 0.4), Vector3(1.9, 0.035, 1.85), Color("f0c36a"))
+	var body := _station("employee", person.id, pos, Vector3(1.7, 1.9, 2.0), Vector3(0.0, 0.95, 0.25))
+	var ring := _add_box(body, Vector3(0.0, 0.05, 0.35), Vector3(1.55, 0.035, 1.7), Color("f0c36a"))
 	ring.visible = false
 	employee_rings.append(ring)
 	employee_ids.append(person.id)
-	_add_box(body, Vector3(0.0, 0.79, 0.9), Vector3(1.55, 0.1, 0.9), _desk_color(person.id))
+	_add_box(body, Vector3(0.0, 0.78, -0.15), Vector3(1.45, 0.1, 0.78), _desk_color(person.id))
+	_add_box(body, Vector3(0.0, 0.58, 0.26), Vector3(1.45, 0.32, 0.08), _desk_color(person.id).darkened(0.12))
 	var corners: Array[Vector3] = [
-		Vector3(-0.66, 0.37, 0.58),
-		Vector3(0.66, 0.37, 0.58),
-		Vector3(-0.66, 0.37, 1.22),
-		Vector3(0.66, 0.37, 1.22),
+		Vector3(-0.6, 0.36, -0.42),
+		Vector3(0.6, 0.36, -0.42),
+		Vector3(-0.6, 0.36, 0.12),
+		Vector3(0.6, 0.36, 0.12),
 	]
 	var corner_index: int = 0
 	while corner_index < corners.size():
-		_add_box(body, corners[corner_index], Vector3(0.1, 0.74, 0.1), WOOD)
+		_add_box(body, corners[corner_index], Vector3(0.09, 0.72, 0.09), WOOD)
 		corner_index += 1
-	_add_box(body, Vector3(0.12, 0.86, 0.95), Vector3(0.52, 0.025, 0.36), Color("f0d7b4"))
-	_add_cylinder(body, Vector3(-0.5, 0.9, 1.15), 0.09, 0.16, CORAL)
-	_add_capsule(body, Vector3(0.0, 0.52, 0.0), 0.2, 0.95, _shirt(person.id))
-	_add_sphere(body, Vector3(0.0, 1.12, 0.02), 0.18, _skin(person.id))
-	var hair := _add_sphere(body, Vector3(0.0, 1.26, -0.02), 0.19, _hair(person.id))
-	hair.scale = Vector3(1.05, 0.62, 1.05)
-	_tag(body, person.display_name, Vector3(0.0, 1.68, 0.0), 42, CREAM)
+	_add_box(body, Vector3(0.15, 0.85, -0.12), Vector3(0.42, 0.02, 0.28), Color("f0d7b4"))
+	_add_cylinder(body, Vector3(-0.48, 0.9, 0.05), 0.08, 0.14, CORAL)
+	_add_capsule(body, Vector3(0.0, 0.5, 0.62), 0.18, 0.9, _shirt(person.id))
+	_add_sphere(body, Vector3(0.0, 1.05, 0.7), 0.17, _skin(person.id))
+	var hair := _add_sphere(body, Vector3(0.0, 1.16, 0.6), 0.17, _hair(person.id))
+	hair.scale = Vector3(1.02, 0.55, 0.9)
+	_add_sphere(body, Vector3(-0.055, 1.08, 0.84), 0.028, INK)
+	_add_sphere(body, Vector3(0.055, 1.08, 0.84), 0.028, INK)
+	_tag(body, person.display_name, Vector3(0.0, 1.48, 0.62), 36, CREAM)
 
 
 func _build_phone(pos: Vector3) -> void:
@@ -254,8 +256,8 @@ func _build_phone(pos: Vector3) -> void:
 	_add_box(body, Vector3(0.46, 0.26, 0.26), Vector3(0.1, 0.52, 0.1), WOOD)
 	_add_box(body, Vector3(0.0, 0.66, 0.0), Vector3(0.5, 0.12, 0.34), CORAL)
 	phone_handset = _add_box(body, Vector3(0.0, 0.8, 0.0), Vector3(0.56, 0.08, 0.16), Color("c4512f"))
-	_tag(body, "Phone", Vector3(0.0, 1.2, 0.0), 48, CREAM)
-	love_label = _tag(body, "5/5", Vector3(0.0, 1.58, 0.0), 64, Color("6b2a22"))
+	phone_name_label = _tag(body, "Phone", Vector3(0.0, 1.12, 0.0), 44, CREAM)
+	love_label = _tag(body, "5/5", Vector3(0.0, 1.55, 0.0), 58, Color("6b2a22"))
 	love_label.visible = false
 
 
@@ -289,7 +291,7 @@ func _build_shelf(pos: Vector3) -> void:
 	_add_box(body, Vector3(0.0, 0.68, 0.02), Vector3(0.42, 0.28, 0.32), Color("c4894a"))
 	_add_box(body, Vector3(0.0, 1.28, 0.02), Vector3(0.42, 0.28, 0.32), Color("6f93b0"))
 	_add_box(body, Vector3(0.0, 1.88, 0.02), Vector3(0.42, 0.28, 0.32), Color("6aa8a0"))
-	_tag(body, "Shelf", Vector3(0.0, 2.28, 0.1), 48, CREAM)
+	_tag(body, "Shelf", Vector3(0.0, 1.55, 0.42), 46, CREAM)
 
 
 func _station(kind: String, id: String, pos: Vector3, shape_size: Vector3, shape_pos: Vector3) -> StaticBody3D:
@@ -584,8 +586,6 @@ func _sync() -> void:
 		note_label.text = game.notice
 		game.notice = ""
 	name_label.text = game.company_name
-	if company_label != null:
-		company_label.text = game.company_name
 	cash_label.text = "Cash %d" % game.cash
 	skill_label.text = "Skill %d" % game.skill
 	if game.skill >= GameState.SKILL_MAX:
@@ -621,6 +621,8 @@ func _sync_phone() -> void:
 	love_track.visible = ringing
 	if love_label != null:
 		love_label.visible = ringing
+	if phone_name_label != null:
+		phone_name_label.visible = not ringing
 	if not ringing:
 		phone_face_id = ""
 		return
