@@ -1,6 +1,6 @@
 extends SceneTree
 
-## Headless checks for calls, stock, love, crafting, and company skill.
+## Headless checks for calls, stock, love, crafting, company skill, and the opening lesson.
 
 var failed: int = 0
 
@@ -12,6 +12,7 @@ func _init() -> void:
 	_check_crafting_chairs_and_phones()
 	_check_research_improves_next_craft()
 	_check_employees_start_at_different_levels()
+	_check_teaching_pauses_love_until_first_payout()
 	if failed > 0:
 		print("FAILED %d" % failed)
 		quit(1)
@@ -32,6 +33,8 @@ func _fresh() -> GameState:
 	var game := GameState.new()
 	game.setup_new_game()
 	game.ambient = false
+	# Later calls use the normal love timer. The lesson check covers the first deal.
+	game.teaching = false
 	return game
 
 
@@ -153,3 +156,38 @@ func _check_employees_start_at_different_levels() -> void:
 	_ok(game.employees.size() >= 3, "the office has a staff")
 	_ok(game.employees[0].level != game.employees[1].level and game.employees[1].level != game.employees[2].level, "employees start at different levels")
 	_ok(game.employees[0].display_name != "" and game.employees[0].role != "", "employees have a name and a role")
+
+
+func _check_teaching_pauses_love_until_first_payout() -> void:
+	var game := GameState.new()
+	game.setup_new_game()
+	game.ambient = false
+	_ok(game.teaching, "a new game teaches the first deal")
+	game.spawn_call("chair", 1)
+	var started := game.caller.love
+	game.tick(8.0)
+	_ok(game.caller != null and is_equal_approx(game.caller.love, started), "love stays while the first caller waits")
+	game.assign_employee("mina")
+	game.tick(30.0)
+	_ok(game.caller != null and game.teaching, "the first caller stays through a short shelf")
+	_ok(is_equal_approx(game.caller.love, started), "love stays while the first deal is still open")
+	_ok(game.caller.phase == "waiting", "a short shelf sends the caller back to waiting")
+	var cash_before := game.cash
+	game.materials["wood"] = 1
+	game.materials["plastic"] = 1
+	game.start_craft("chair")
+	game.tick(game.craft.seconds_left)
+	_ok(game.goods_qty("chair") == 1 and game.teaching, "the lesson continues until the deal pays")
+	game.assign_employee("mina")
+	var during := game.caller.love
+	game.tick(1.0)
+	_ok(game.caller != null and game.caller.phase == "talking" and is_equal_approx(game.caller.love, during), "love stays while the chair is handed over")
+	game.tick(game.answer_seconds("chair", 1))
+	var mina := game.find_employee("mina")
+	_ok(game.caller == null and game.teaching == false, "the first payout ends the lesson")
+	_ok(game.cash == cash_before + game.unit_pay("chair") - game.commission_for(game.unit_pay("chair")), "the lesson deal pays the company")
+	_ok(mina != null and mina.calls_closed == 1, "the lesson deal counts as closed")
+	game.spawn_call("phone", 1)
+	var next_love := game.caller.love
+	game.tick(3.0)
+	_ok(game.caller != null and game.caller.love < next_love, "love falls again after the first payout")

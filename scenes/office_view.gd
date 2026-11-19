@@ -2,6 +2,7 @@ class_name OfficeView
 extends Control
 
 ## Steep 3D toy office. Click people, the phone, the bench, and the supply shelf.
+## The opening lesson draws an arrow over the view until the first deal pays.
 
 const INK := Color("3a2c24")
 const CREAM := Color("fff6e8")
@@ -66,6 +67,13 @@ var love_label: Label3D
 var craft_label: Label3D
 var employee_ids: Array[String] = []
 var employee_rings: Array[MeshInstance3D] = []
+var phone_body: StaticBody3D
+var bench_body: StaticBody3D
+var shelf_body: StaticBody3D
+var employee_bodies: Dictionary[String, StaticBody3D] = {}
+var guide: LessonGuide
+var lesson_seen_call: bool = false
+var lesson_answered: bool = false
 
 
 func bind(next: GameState) -> void:
@@ -80,6 +88,7 @@ func _ready() -> void:
 	_build_hud()
 	if game != null:
 		_build_actors()
+	_build_guide()
 
 
 func _process(delta: float) -> void:
@@ -88,6 +97,7 @@ func _process(delta: float) -> void:
 	_time += delta
 	_fit_viewport()
 	_sync()
+	_sync_lesson()
 	_animate()
 
 
@@ -218,6 +228,7 @@ func _build_actors() -> void:
 
 func _build_employee(person: GameState.Employee, pos: Vector3) -> void:
 	var body := _station("employee", person.id, pos, Vector3(1.7, 1.9, 2.0), Vector3(0.0, 0.95, 0.25))
+	employee_bodies[person.id] = body
 	var ring := _add_box(body, Vector3(0.0, 0.05, 0.35), Vector3(1.55, 0.035, 1.7), Color("f0c36a"))
 	ring.visible = false
 	employee_rings.append(ring)
@@ -247,6 +258,7 @@ func _build_employee(person: GameState.Employee, pos: Vector3) -> void:
 
 func _build_phone(pos: Vector3) -> void:
 	var body := _station("phone", "phone", pos, Vector3(1.7, 1.5, 1.5), Vector3(0.0, 0.75, 0.0))
+	phone_body = body
 	phone_ring = _add_box(body, Vector3(0.0, 0.045, 0.0), Vector3(1.45, 0.03, 1.15), Color("f0c36a"))
 	phone_ring.visible = false
 	_add_box(body, Vector3(0.0, 0.52, 0.0), Vector3(1.2, 0.1, 0.78), Color("c4894a"))
@@ -263,6 +275,7 @@ func _build_phone(pos: Vector3) -> void:
 
 func _build_bench(pos: Vector3) -> void:
 	var body := _station("bench", "bench", pos, Vector3(2.6, 1.4, 1.5), Vector3(0.0, 0.7, 0.0))
+	bench_body = body
 	bench_ring = _add_box(body, Vector3(0.0, 0.045, 0.0), Vector3(2.45, 0.03, 1.25), Color("f0c36a"))
 	bench_ring.visible = false
 	_add_box(body, Vector3(0.0, 0.74, 0.0), Vector3(2.3, 0.12, 1.05), Color("d08a45"))
@@ -280,6 +293,7 @@ func _build_bench(pos: Vector3) -> void:
 
 func _build_shelf(pos: Vector3) -> void:
 	var body := _station("shelf", "shelf", pos, Vector3(1.7, 2.3, 1.15), Vector3(0.0, 1.15, 0.0))
+	shelf_body = body
 	shelf_ring = _add_box(body, Vector3(0.0, 0.045, 0.15), Vector3(1.55, 0.03, 1.05), Color("f0c36a"))
 	shelf_ring.visible = false
 	_add_box(body, Vector3(0.0, 1.05, -0.28), Vector3(1.4, 2.1, 0.1), WOOD)
@@ -924,3 +938,474 @@ func _plate(color: Color, radius: int) -> StyleBoxFlat:
 	box.content_margin_top = 6
 	box.content_margin_bottom = 6
 	return box
+
+
+enum LessonStep {
+	WAIT_RING,
+	SEE_CALL,
+	SEND_EMPLOYEE,
+	OPEN_SHELF,
+	BUY_MATERIAL,
+	OPEN_BENCH,
+	START_CRAFT,
+	WAIT_CRAFT,
+	HAND_EMPLOYEE,
+	HAND_CALL,
+}
+
+
+func _build_guide() -> void:
+	guide = LessonGuide.new()
+	guide.set_anchors_preset(Control.PRESET_FULL_RECT)
+	guide.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	guide.z_index = 20
+	guide.visible = false
+	add_child(guide)
+
+
+func _sync_lesson() -> void:
+	if guide == null:
+		return
+	if game == null or not game.teaching or guide.size.x < 32.0 or guide.size.y < 32.0:
+		guide.shown = false
+		return
+	_advance_lesson_flags()
+	var step := _lesson_step()
+	var point := _lesson_point(step)
+	if point.x < -1000.0:
+		guide.shown = false
+		return
+	var local_tip: Vector2 = guide.get_global_transform().affine_inverse() * point
+	guide.tip = local_tip
+	guide.message = _lesson_line(step)
+	guide.shown = true
+
+
+func _advance_lesson_flags() -> void:
+	if game.caller == null:
+		return
+	if selected == "phone":
+		lesson_seen_call = true
+	if game.caller.phase == "talking":
+		lesson_seen_call = true
+		lesson_answered = true
+
+
+func _lesson_step() -> LessonStep:
+	if game.caller == null:
+		return LessonStep.WAIT_RING
+	var need_goods := game.goods_qty(game.caller.product_id) < game.caller.qty
+	if not lesson_answered and game.caller.phase == "waiting" and not lesson_seen_call:
+		return LessonStep.SEE_CALL
+	if not lesson_answered and game.caller.phase == "waiting":
+		return LessonStep.SEND_EMPLOYEE
+	if need_goods:
+		if game.craft != null:
+			return LessonStep.WAIT_CRAFT
+		if _needed_material() != "":
+			if selected == "shelf":
+				return LessonStep.BUY_MATERIAL
+			return LessonStep.OPEN_SHELF
+		if selected == "bench":
+			return LessonStep.START_CRAFT
+		return LessonStep.OPEN_BENCH
+	if game.caller.phase == "waiting":
+		return LessonStep.HAND_EMPLOYEE
+	return LessonStep.HAND_CALL
+
+
+func _lesson_point(step: LessonStep) -> Vector2:
+	if step == LessonStep.WAIT_RING:
+		return _phone_world_point()
+	if step == LessonStep.SEE_CALL or step == LessonStep.HAND_CALL:
+		return _control_point(phone_panel)
+	if step == LessonStep.SEND_EMPLOYEE or step == LessonStep.HAND_EMPLOYEE:
+		return _employee_point()
+	if step == LessonStep.OPEN_SHELF:
+		return _shelf_point()
+	if step == LessonStep.BUY_MATERIAL:
+		var bought := _control_point(_material_button(_needed_material()))
+		if bought.x > -1000.0:
+			return bought
+		return _shelf_point()
+	if step == LessonStep.START_CRAFT:
+		var craft_point := _control_point(_product_button())
+		if craft_point.x > -1000.0:
+			return craft_point
+		return _bench_point()
+	if step == LessonStep.OPEN_BENCH or step == LessonStep.WAIT_CRAFT:
+		return _bench_point()
+	return Vector2(-10000.0, -10000.0)
+
+
+func _lesson_line(step: LessonStep) -> String:
+	var who := _lesson_who()
+	var item := _lesson_item()
+	var bundle := _lesson_bundle()
+	var material := _material_word()
+	var craft_name := "Chair"
+	if game.caller != null:
+		craft_name = game.product_label(game.caller.product_id)
+	if step == LessonStep.WAIT_RING:
+		return "Wait for the phone to ring."
+	if step == LessonStep.SEE_CALL:
+		return "Press the incoming call to meet the caller."
+	if step == LessonStep.SEND_EMPLOYEE:
+		return "Send %s to take the call." % who
+	if step == LessonStep.OPEN_SHELF:
+		return "Buy %s from the supply shelf." % material
+	if step == LessonStep.BUY_MATERIAL:
+		return "Buy a pack of %s." % material
+	if step == LessonStep.OPEN_BENCH:
+		return "Craft the %s on the workbench." % item
+	if step == LessonStep.START_CRAFT:
+		return "Press %s to craft it." % craft_name
+	if step == LessonStep.WAIT_CRAFT:
+		return "Wait for the %s to finish." % item
+	if step == LessonStep.HAND_EMPLOYEE:
+		return "Send %s to hand over %s." % [who, bundle]
+	if step == LessonStep.HAND_CALL:
+		return "%s hands %s to the caller." % [who, bundle]
+	return "Wait for the phone to ring."
+
+
+func _lesson_who() -> String:
+	var person := _lesson_employee()
+	if person == null:
+		return "Someone"
+	return _short_name(person.display_name)
+
+
+func _lesson_employee() -> GameState.Employee:
+	if game.caller != null and game.caller.employee_id != "":
+		var current := game.find_employee(game.caller.employee_id)
+		if current != null:
+			return current
+	var mina := game.find_employee("mina")
+	if mina != null and not mina.busy:
+		return mina
+	var index: int = 0
+	while index < game.employees.size():
+		var person: GameState.Employee = game.employees[index]
+		if not person.busy:
+			return person
+		index += 1
+	if game.employees.is_empty():
+		return null
+	return game.employees[0]
+
+
+func _short_name(display_name: String) -> String:
+	var trimmed := display_name.strip_edges()
+	var space := trimmed.find(" ")
+	if space <= 0:
+		return trimmed
+	return trimmed.substr(0, space)
+
+
+func _lesson_item() -> String:
+	if game.caller == null:
+		return "order"
+	return game.product_name(game.caller.product_id)
+
+
+func _lesson_bundle() -> String:
+	if game.caller == null:
+		return "the order"
+	if game.caller.qty <= 1:
+		return "the %s" % _lesson_item()
+	return game.product_phrase(game.caller.product_id, game.caller.qty)
+
+
+func _material_word() -> String:
+	var material_id := _needed_material()
+	if material_id == "":
+		return "materials"
+	return game.material_name(material_id).to_lower()
+
+
+func _needed_material() -> String:
+	if game == null or game.caller == null:
+		return ""
+	var index: int = 0
+	while index < GameState.MATERIAL_ORDER.size():
+		var material_id: String = GameState.MATERIAL_ORDER[index]
+		if game.recipe_count(game.caller.product_id, material_id) > game.material_qty(material_id):
+			return material_id
+		index += 1
+	return ""
+
+
+func _phone_world_point() -> Vector2:
+	var world_point := _body_point(phone_body, Vector3(0.0, 1.05, 0.0))
+	if world_point.x > -1000.0 and not _covered_by_hud(world_point):
+		return world_point
+	return _control_point(phone_panel)
+
+
+func _employee_point() -> Vector2:
+	var person := _lesson_employee()
+	if person == null:
+		return Vector2(-10000.0, -10000.0)
+	var world_point := _body_point(_employee_body(person.id), Vector3(0.0, 1.35, 0.7))
+	if world_point.x > -1000.0 and not _covered_by_hud(world_point):
+		return world_point
+	return _card_point(person.id)
+
+
+func _shelf_point() -> Vector2:
+	var plaque := _control_point(_material_plaque(_needed_material()))
+	if plaque.x > -1000.0:
+		return plaque
+	var world_point := _body_point(shelf_body, Vector3(0.0, 1.45, 0.2))
+	if world_point.x > -1000.0 and not _covered_by_hud(world_point):
+		return world_point
+	return plaque
+
+
+func _bench_point() -> Vector2:
+	var world_point := _body_point(bench_body, Vector3(0.0, 1.2, 0.0))
+	if world_point.x > -1000.0 and not _covered_by_hud(world_point):
+		return world_point
+	var plaque := _control_point(bench_plaque)
+	if plaque.x > -1000.0:
+		return plaque
+	return _control_point(_product_plaque())
+
+
+func _employee_body(employee_id: String) -> StaticBody3D:
+	if employee_id == "" or not employee_bodies.has(employee_id):
+		return null
+	return employee_bodies[employee_id] as StaticBody3D
+
+
+func _card_point(employee_id: String) -> Vector2:
+	var index: int = 0
+	while index < card_ids.size() and index < cards.size():
+		if card_ids[index] == employee_id:
+			return _control_point(cards[index])
+		index += 1
+	return Vector2(-10000.0, -10000.0)
+
+
+func _material_plaque(material_id: String) -> Button:
+	if material_id == "plastic":
+		return plastic_plaque
+	if material_id == "glass":
+		return glass_plaque
+	return wood_plaque
+
+
+func _material_button(material_id: String) -> Button:
+	if material_id == "plastic":
+		return plastic_button
+	if material_id == "glass":
+		return glass_button
+	return wood_button
+
+
+func _product_plaque() -> Button:
+	if game.caller != null and game.caller.product_id == "phone":
+		return phone_plaque
+	return chair_plaque
+
+
+func _product_button() -> Button:
+	if game.caller != null and game.caller.product_id == "phone":
+		return phone_button
+	return chair_button
+
+
+func _covered_by_hud(point: Vector2) -> bool:
+	if phone_panel != null and is_instance_valid(phone_panel) and phone_panel.is_visible_in_tree():
+		var bar := phone_panel.get_global_rect()
+		if point.y <= bar.end.y + 6.0:
+			return true
+	if _panel_covers(bench_panel, point):
+		return true
+	if _panel_covers(shelf_panel, point):
+		return true
+	var index: int = 0
+	while index < cards.size():
+		if _panel_covers(cards[index], point):
+			return true
+		index += 1
+	return false
+
+
+func _panel_covers(node: Control, point: Vector2) -> bool:
+	if node == null or not is_instance_valid(node) or not node.is_visible_in_tree():
+		return false
+	return node.get_global_rect().grow(8.0).has_point(point)
+
+
+func _control_point(node: Control) -> Vector2:
+	if node == null or not is_instance_valid(node) or not node.is_visible_in_tree():
+		return Vector2(-10000.0, -10000.0)
+	var rect := node.get_global_rect()
+	if rect.size.x < 2.0 or rect.size.y < 2.0:
+		return Vector2(-10000.0, -10000.0)
+	return _point_at_rect(rect)
+
+
+func _point_at_rect(rect: Rect2) -> Vector2:
+	var center := rect.get_center()
+	if guide == null or guide.size.x < 32.0 or guide.size.y < 32.0:
+		return center
+	var screen_center: Vector2 = guide.get_global_transform() * (guide.size * 0.5)
+	var toward := center - screen_center
+	if toward.length() < 8.0:
+		return Vector2(center.x, rect.position.y - 8.0)
+	toward = toward.normalized()
+	var half := rect.size * 0.5
+	var reach_x := half.x / maxf(absf(toward.x), 0.05)
+	var reach_y := half.y / maxf(absf(toward.y), 0.05)
+	return center - toward * (minf(reach_x, reach_y) + 8.0)
+
+
+func _body_point(body: Node3D, local_pos: Vector3) -> Vector2:
+	if body == null or camera == null or view_box == null or viewport == null:
+		return Vector2(-10000.0, -10000.0)
+	var world_pos := body.to_global(local_pos)
+	if camera.is_position_behind(world_pos):
+		return Vector2(-10000.0, -10000.0)
+	var projected := camera.unproject_position(world_pos)
+	if is_nan(projected.x) or is_nan(projected.y) or is_inf(projected.x) or is_inf(projected.y):
+		return Vector2(-10000.0, -10000.0)
+	var vp_size := Vector2(viewport.size)
+	var area := view_box.size
+	if vp_size.x < 1.0 or vp_size.y < 1.0 or area.x < 1.0 or area.y < 1.0:
+		return Vector2(-10000.0, -10000.0)
+	var local := Vector2(projected.x * area.x / vp_size.x, projected.y * area.y / vp_size.y)
+	if local.x < 16.0 or local.y < 16.0 or local.x > area.x - 16.0 or local.y > area.y - 16.0:
+		return Vector2(-10000.0, -10000.0)
+	return view_box.get_global_transform() * local
+
+
+class LessonGuide extends Control:
+	var message: String = ""
+	var tip: Vector2 = Vector2.ZERO
+	var shown: bool = false
+	var tail: Vector2 = Vector2.ZERO
+	var aim: Vector2 = Vector2.UP
+	var line: Label
+	var plate: PanelContainer
+
+	func _ready() -> void:
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		set_anchors_preset(Control.PRESET_FULL_RECT)
+		var style := StyleBoxFlat.new()
+		style.bg_color = Color("fff6e8")
+		style.border_color = Color("6b3e22")
+		style.set_border_width_all(3)
+		style.set_corner_radius_all(12)
+		style.content_margin_left = 14
+		style.content_margin_right = 14
+		style.content_margin_top = 8
+		style.content_margin_bottom = 8
+		style.shadow_color = Color(0.23, 0.17, 0.14, 0.35)
+		style.shadow_size = 6
+		style.shadow_offset = Vector2(0, 3)
+		plate = PanelContainer.new()
+		plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		plate.add_theme_stylebox_override("panel", style)
+		add_child(plate)
+		line = Label.new()
+		line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		line.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		line.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		line.autowrap_mode = TextServer.AUTOWRAP_OFF
+		var fallback: Font = ThemeDB.fallback_font
+		if fallback != null:
+			line.add_theme_font_override("font", fallback)
+		line.add_theme_font_size_override("font_size", 20)
+		line.add_theme_color_override("font_color", Color("3a2c24"))
+		plate.add_child(line)
+		visible = false
+
+	func _process(_delta: float) -> void:
+		visible = shown
+		if not shown:
+			return
+		_refresh_aim()
+		_place_line()
+		queue_redraw()
+
+	func _refresh_aim() -> void:
+		var center := size * 0.5
+		var delta := tip - center
+		if delta.length() < 1.0:
+			aim = Vector2(0.0, -1.0)
+		else:
+			aim = delta.normalized()
+		var bob := sin(float(Time.get_ticks_msec()) * 0.006) * 10.0
+		tail = tip - aim * (124.0 + bob)
+
+	func _place_line() -> void:
+		var font: Font = ThemeDB.fallback_font
+		if font != null:
+			line.add_theme_font_override("font", font)
+		line.add_theme_font_size_override("font_size", 20)
+		line.text = message
+		var max_width := maxf(size.x - 48.0, 180.0)
+		var text_size := Vector2(180.0, 26.0)
+		if font != null:
+			text_size = font.get_string_size(message, HORIZONTAL_ALIGNMENT_CENTER, -1, 20)
+		if text_size.x > max_width and font != null:
+			line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			text_size = font.get_string_size(message, HORIZONTAL_ALIGNMENT_CENTER, max_width, 20)
+			text_size.x = max_width
+		else:
+			line.autowrap_mode = TextServer.AUTOWRAP_OFF
+		var box_size := text_size + Vector2(28.0, 16.0)
+		line.custom_minimum_size = text_size
+		plate.custom_minimum_size = box_size
+		plate.size = box_size
+		var rest := tip - aim * 124.0
+		var pos := rest - aim * (box_size.y * 0.5 + 16.0) - box_size * 0.5
+		pos = _clamp_plate(pos, box_size)
+		if Rect2(pos, box_size).grow(12.0).has_point(tip):
+			var side := Vector2(-aim.y, aim.x)
+			pos = _clamp_plate(pos + side * (box_size.y + 28.0), box_size)
+		plate.position = pos
+		plate.size = box_size
+
+	func _clamp_plate(pos: Vector2, box_size: Vector2) -> Vector2:
+		var margin_bottom := 120.0
+		if size.y < 520.0:
+			margin_bottom = 16.0
+		var max_x := maxf(size.x - box_size.x - 12.0, 12.0)
+		var max_y := maxf(size.y - box_size.y - margin_bottom, 12.0)
+		pos.x = clampf(pos.x, 12.0, max_x)
+		pos.y = clampf(pos.y, 12.0, max_y)
+		return pos
+
+	func _draw() -> void:
+		if not shown:
+			return
+		_draw_arrow(tail + Vector2(3.0, 4.0), tip + Vector2(3.0, 4.0), Color(0.23, 0.17, 0.14, 0.28), 12.0, 34.0)
+		_draw_arrow(tail, tip, Color("3a2c24"), 11.0, 32.0)
+		_draw_arrow(tail, tip, Color("fff6e8"), 8.0, 26.0)
+		_draw_arrow(tail, tip, Color("e06a58"), 5.0, 20.0)
+		draw_circle(tail, 9.0, Color("3a2c24"))
+		draw_circle(tail, 6.0, Color("fff6e8"))
+
+	func _draw_arrow(from: Vector2, to: Vector2, fill: Color, width: float, head: float) -> void:
+		var delta := to - from
+		var length := delta.length()
+		if length < 4.0:
+			return
+		var dir := delta / length
+		var side := Vector2(-dir.y, dir.x)
+		var neck := to - dir * head
+		var shaft := PackedVector2Array()
+		shaft.push_back(from + side * width)
+		shaft.push_back(neck + side * width)
+		shaft.push_back(neck - side * width)
+		shaft.push_back(from - side * width)
+		draw_colored_polygon(shaft, fill)
+		var head_poly := PackedVector2Array()
+		head_poly.push_back(to)
+		head_poly.push_back(neck + side * head * 0.62)
+		head_poly.push_back(neck - side * head * 0.62)
+		draw_colored_polygon(head_poly, fill)

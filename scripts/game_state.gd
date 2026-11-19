@@ -3,6 +3,7 @@ extends RefCounted
 
 ## Real-time office. Customers call for chairs and mobile phones.
 ## Employees take the call, the bench crafts from supplier materials, and love falls while a caller waits.
+## The opening lesson holds that love until the first payout, so the first deal can be finished.
 
 const MATERIAL_ORDER: Array[String] = ["wood", "plastic", "glass"]
 const CALLER_NAMES: Array[String] = ["Nia Cole", "Ellis Park", "Remy Cho", "Jordan Hale", "Sable Quinn"]
@@ -27,6 +28,7 @@ var ambient: bool = true
 var spawn_wait: float = 1.2
 var calls_made: int = 0
 var next_caller: int = 0
+var teaching: bool = true
 
 
 func _init(seed_value: int = 1) -> void:
@@ -72,6 +74,7 @@ func setup_new_game() -> void:
 	spawn_wait = 1.2
 	calls_made = 0
 	next_caller = 0
+	teaching = true
 	caller = null
 	craft = null
 	materials.clear()
@@ -363,7 +366,7 @@ func tick(delta: float) -> void:
 
 func _next_step(left: float) -> float:
 	var step := left
-	if caller != null and caller.love > 0.0:
+	if caller != null and _love_drains() and caller.love > 0.0:
 		var love_time := caller.love / LOVE_PER_SECOND
 		if love_time < step:
 			step = love_time
@@ -379,8 +382,12 @@ func _next_step(left: float) -> float:
 	return step
 
 
+func _love_drains() -> bool:
+	return not teaching
+
+
 func _apply_step(step: float) -> void:
-	if caller != null:
+	if caller != null and _love_drains():
 		caller.love -= LOVE_PER_SECOND * step
 	if craft != null:
 		craft.seconds_left -= step
@@ -451,6 +458,7 @@ func _try_close_deal() -> void:
 	else:
 		cash += pay
 		notice = "%s paid %d." % [buyer, pay]
+	teaching = false
 	caller = null
 	spawn_wait = 6.5
 
