@@ -21,12 +21,30 @@ var bank_button: Button
 var end_button: Button
 var view := "home"
 var status := ""
+var cloud: Cloud
+var gate: Control
+var name_box: LineEdit
+var gate_note: Label
+var started := false
+var pending_hire_id := ""
+var pending_hire_pay := 0
+var rank_rows: Array = []
+var market_rows: Array = []
+var paid_sales := {}
 
 
 func _ready() -> void:
 	state = GameState.new()
 	state.setup_new_game()
+	cloud = Cloud.new()
+	cloud.account_changed.connect(_on_account)
+	cloud.board_arrived.connect(_on_board)
+	cloud.market_arrived.connect(_on_market)
+	cloud.claim_arrived.connect(_on_claim)
+	cloud.sale_arrived.connect(_on_sale)
+	add_child(cloud)
 	_build()
+	_build_gate()
 	_show_view()
 
 
@@ -43,11 +61,16 @@ func _build() -> void:
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(hud)
 
+	var plaque := PanelContainer.new()
+	plaque.position = Vector2(20, 12)
+	plaque.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	plaque.add_theme_stylebox_override("panel", _sign_box(Color("3e3128")))
+	hud.add_child(plaque)
 	header = Label.new()
-	header.position = Vector2(28, 18)
+	header.add_theme_font_override("font", ThemeDB.fallback_font)
 	header.add_theme_font_size_override("font_size", 20)
 	header.add_theme_color_override("font_color", CREAM)
-	hud.add_child(header)
+	plaque.add_child(header)
 
 	var blotter := PanelContainer.new()
 	blotter.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -84,15 +107,29 @@ func _build() -> void:
 	_sign(shelf, "Suppliers", SEA, func() -> void: view = "suppliers"; _show_view())
 	_sign(shelf, "Recruit", PLUM, func() -> void: view = "recruit"; _show_view())
 	bank_button = _sign(shelf, "Bank", GOLD, func() -> void: view = "bank"; _show_view())
+	_sign(shelf, "Rank", Color("6e5d48"), func() -> void:
+		view = "rank"
+		cloud.load_board()
+		cloud.push_company(_company_card())
+		_show_view()
+	)
+	_sign(shelf, "Market", Color("5d5d78"), func() -> void:
+		view = "market"
+		cloud.load_market()
+		_show_view()
+	)
 	end_button = _sign(shelf, "End week", MOSS, func() -> void:
 		status = state.end_week()
 		view = "mail"
+		cloud.push_company(_company_card())
 		_show_view()
 	)
 
 
 func _warm_theme() -> Theme:
 	var warm := Theme.new()
+	warm.default_font = ThemeDB.fallback_font
+	warm.default_font_size = 18
 	var normal := StyleBoxFlat.new()
 	normal.bg_color = Color("c47a3a")
 	normal.corner_radius_top_left = 12
@@ -136,6 +173,7 @@ func _sign(shelf: HBoxContainer, text: String, color: Color, action: Callable) -
 	button.text = text
 	button.custom_minimum_size = Vector2(0, 52)
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.add_theme_font_override("font", ThemeDB.fallback_font)
 	button.add_theme_color_override("font_color", CREAM)
 	button.add_theme_color_override("font_hover_color", CREAM)
 	button.add_theme_color_override("font_pressed_color", CREAM)
@@ -195,7 +233,7 @@ func _press_seat(seat: int) -> void:
 
 
 func _show_view() -> void:
-	header.text = "Week %d    Cash %d    Debt %d    Credit %d" % [state.week, state.cash, state.debt, state.credit]
+	header.text = "%s    Week %d    Cash %d    Parts %d    Debt %d" % [state.company_name, state.week, state.cash, state.stock, state.debt]
 	if state.lost:
 		header.text += "\n" + state.loss_reason
 	elif state.season_held:
@@ -220,6 +258,10 @@ func _show_view() -> void:
 		_show_recruit()
 	elif view == "bank":
 		_show_bank()
+	elif view == "rank":
+		_show_rank()
+	elif view == "market":
+		_show_market()
 	elif view.begins_with("person:"):
 		_show_person(view.substr(7))
 	else:
@@ -229,11 +271,11 @@ func _show_view() -> void:
 func _show_home() -> void:
 	_card(SAGE, ["How a box is made", "Buy parts from a supplier", "Staff pack those parts", "The customer pays"])
 	for customer in state._customers():
-		_card(CLAY, [customer.display_name, "Buys " + customer.goods, customer.recipe, state.hearts(customer.love)])
+		_card(CLAY, [customer.display_name, "Buys " + customer.goods, customer.recipe, "Love %s" % state.hearts(customer.love)], customer.id)
 	_card(SEA, ["Chairs", "Four desks", "Look on Recruit for more people", "Look on Suppliers for more parts"])
 
 
-func _card(tint: Color, columns: Array) -> void:
+func _card(tint: Color, columns: Array, face_id: String = "") -> void:
 	var row := PanelContainer.new()
 	var box := _paper_box(tint)
 	box.bg_color = Color("f4eadc")
@@ -243,6 +285,8 @@ func _card(tint: Color, columns: Array) -> void:
 	var line := HBoxContainer.new()
 	line.add_theme_constant_override("separation", 14)
 	row.add_child(line)
+	if face_id != "":
+		line.add_child(FaceBadge.for_id(face_id))
 	for i in columns.size():
 		var text := str(columns[i])
 		if text == "":
@@ -250,6 +294,7 @@ func _card(tint: Color, columns: Array) -> void:
 		var label := Label.new()
 		label.text = text
 		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label.add_theme_font_override("font", ThemeDB.fallback_font)
 		label.add_theme_color_override("font_color", INK)
 		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		label.custom_minimum_size = Vector2(120 if i == 0 else 0, 0)
@@ -365,8 +410,26 @@ func _deal_block(deal: Dictionary) -> void:
 		str(deal["stage"]).capitalize(),
 		partner.display_name,
 		"%d %s at %d" % [int(deal["units"]), bought, int(deal["unit_price"])],
-		state.hearts(partner.love),
-	])
+		"Love %s" % state.hearts(partner.love),
+	], partner.id)
+	if str(deal["stage"]) == "offer":
+		var offer_id := str(deal["id"])
+		_add_button("Accept order", func() -> void:
+			_note(func() -> String: return state.accept_order(offer_id))
+		)
+		_add_button("Reject order", func() -> void:
+			_note(func() -> String: return state.reject_order(offer_id))
+		)
+		return
+	if str(deal["stage"]) == "quality":
+		var quality_id := str(deal["id"])
+		_add_button("Give the money back", func() -> void:
+			_note(func() -> String: return state.answer_quality(quality_id, true))
+		)
+		_add_button("Offer a discount", func() -> void:
+			_note(func() -> String: return state.answer_quality(quality_id, false))
+		)
+		return
 	_card(GOLD, ["Made by", partner.recipe if partner.recipe != "" else "Staff follow the deal.", "Following: " + crew_text, partner.habit_line()])
 	for hired in state.hired_people():
 		var deal_id := str(deal["id"])
@@ -379,7 +442,7 @@ func _deal_block(deal: Dictionary) -> void:
 func _show_suppliers() -> void:
 	if state.cooperate_from != "":
 		var asking: GameState.Person = state.person(state.cooperate_from)
-		_card(SEA, [asking.display_name, "Sells " + asking.goods, "Asks %d" % asking.ask, state.hearts(asking.love)])
+		_card(SEA, [asking.display_name, "Sells " + asking.goods, "Asks %d" % asking.ask, "Love %s" % state.hearts(asking.love)], asking.id)
 		_add_button("Accept their price", func() -> void:
 			_note(func() -> String: return state.accept_cooperation())
 		)
@@ -392,8 +455,8 @@ func _show_suppliers() -> void:
 			supplier.display_name,
 			"Sells " + supplier.goods,
 			"Ask %d" % supplier.ask,
-			state.hearts(supplier.love) if supplier.active else "Contract ended",
-		])
+			("Love %s" % state.hearts(supplier.love)) if supplier.active else "Contract ended",
+		], supplier.id)
 		_card(GOLD, [supplier.gift_line(), supplier.habit_line(), supplier.severity, ""])
 		if not supplier.active:
 			continue
@@ -414,7 +477,7 @@ func _show_recruit() -> void:
 		_card(PLUM, ["Recruit", "Nobody is waiting.", "Look, or wait for mail."])
 	for id in state.visible_applicants:
 		var applicant: GameState.Person = state.person(str(id))
-		_card(PLUM, [applicant.display_name, applicant.gift_line(), applicant.habit_line(), "Ask %d" % applicant.ask])
+		_card(PLUM, [applicant.display_name, applicant.gift_line(), applicant.habit_line(), "Ask %d    Love %s" % [applicant.ask, state.hearts(applicant.love)]], applicant.id)
 		if state.pending_think.has(applicant.id):
 			_bind_insist(applicant.id)
 		var spin := _add_spin(applicant.ask, 10, 2000)
@@ -440,7 +503,7 @@ func _show_person(id: String) -> void:
 	if not p.hired:
 		_add_label("That chair is empty.")
 		return
-	_card(PLUM, [p.display_name, p.balance, state.hearts(p.love), "Pay %d" % p.pay])
+	_card(PLUM, [p.display_name, p.balance, "Love %s" % state.hearts(p.love), "Pay %d" % p.pay], p.id)
 	_card(SAGE, [p.gift_line(), p.habit_line(), "Workload %d" % p.base_workload, "Pace %d" % p.base_pace])
 	if p.training:
 		_card(GOLD, ["Training", "No deal work this period.", "The salary is still paid.", ""])
@@ -453,11 +516,16 @@ func _show_person(id: String) -> void:
 		_note(func() -> String: return state.train(who))
 	)
 	_add_button("Fire", func() -> void:
+		cloud.release(who)
 		_note(func() -> String:
 			var text: String = state.fire(who)
 			view = "home"
 			return text
 		)
+	)
+	var sale_price := _add_spin(p.pay * 4, 100, 20000)
+	_add_button("List them on the market", func() -> void:
+		cloud.list_sale(who, p.display_name, p.gift_line(), int(sale_price.value))
 	)
 	_card(CLAY, ["Deals they can follow", "Assign them from a row below.", "", ""])
 	var any := false
@@ -499,7 +567,229 @@ func _bind_break(who: String) -> void:
 	)
 
 
+func _build_gate() -> void:
+	gate = PanelContainer.new()
+	gate.set_anchors_preset(Control.PRESET_FULL_RECT)
+	gate.offset_left = 48
+	gate.offset_top = 36
+	gate.offset_right = -48
+	gate.offset_bottom = -36
+	gate.add_theme_stylebox_override("panel", _paper_box(Color("8a7356")))
+	add_child(gate)
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	gate.add_child(scroll)
+	var box := VBoxContainer.new()
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_theme_constant_override("separation", 8)
+	scroll.add_child(box)
+	var title := Label.new()
+	title.text = "Open the company"
+	title.add_theme_font_override("font", ThemeDB.fallback_font)
+	title.add_theme_font_size_override("font_size", 28)
+	title.add_theme_color_override("font_color", INK)
+	box.add_child(title)
+	for line in [
+		"1. Name the company. You are the director. You do not walk. You press the shelf.",
+		"2. Hire someone on Recruit. There are four chairs. Signed in, the person you hire cannot be hired by another player.",
+		"3. An order arrives. Accept it, or reject it. Accept, and they may come back at a higher price. Reject, and they may not return.",
+		"4. While the order is open, find a supplier. You pay cash when the parts arrive. Packing starts once those parts are in the office.",
+		"5. You are paid when the customer takes the goods. If they dislike the quality, choose a refund or a discount.",
+		"Love is a number out of 5. It changes how much and how fast the work goes. It does not stop a bad habit.",
+	]:
+		var step := Label.new()
+		step.text = line
+		step.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		step.custom_minimum_size = Vector2(720, 0)
+		step.add_theme_font_override("font", ThemeDB.fallback_font)
+		step.add_theme_color_override("font_color", INK)
+		box.add_child(step)
+	name_box = LineEdit.new()
+	name_box.placeholder_text = "Company name"
+	name_box.text = "Oak Desk"
+	name_box.custom_minimum_size = Vector2(280, 40)
+	name_box.add_theme_font_override("font", ThemeDB.fallback_font)
+	box.add_child(name_box)
+	var guest := Button.new()
+	guest.text = "Play as guest"
+	guest.add_theme_font_override("font", ThemeDB.fallback_font)
+	guest.pressed.connect(_play_guest)
+	box.add_child(guest)
+	var google := Button.new()
+	google.text = "Sign in with Google"
+	google.add_theme_font_override("font", ThemeDB.fallback_font)
+	google.pressed.connect(func() -> void: cloud.sign_in())
+	box.add_child(google)
+	gate_note = Label.new()
+	gate_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	gate_note.add_theme_font_override("font", ThemeDB.fallback_font)
+	gate_note.add_theme_color_override("font_color", INK)
+	gate_note.text = "A guest keeps this office on this computer. Google keeps the company, the ranking, and the staff market."
+	box.add_child(gate_note)
+
+
+func _play_guest() -> void:
+	var named := name_box.text.strip_edges()
+	if named.length() < 2:
+		gate_note.text = "Give the company a name of at least 2 letters."
+		return
+	state.company_name = named
+	started = true
+	gate.visible = false
+	_show_view()
+
+
+func _company_card() -> Dictionary:
+	var best_output := 0
+	for person in state.hired_people():
+		best_output = maxi(best_output, person.made)
+	return {
+		"name": state.company_name,
+		"profit": state.lifetime_profit,
+		"capital": state.cash,
+		"workers": state.hired_people().size(),
+		"best_worker": state.best_worker_name(),
+		"best_output": best_output,
+	}
+
+
+func _on_account() -> void:
+	if gate_note == null:
+		return
+	if cloud.last_error != "":
+		gate_note.text = cloud.last_error
+	elif cloud.signed_in and not started:
+		var named := name_box.text.strip_edges()
+		if named.length() < 2:
+			named = cloud.display_name if cloud.display_name != "" else "Company"
+		state.company_name = named
+		started = true
+		gate.visible = false
+		gate_note.text = "Signed in."
+		_show_view()
+	elif cloud.signed_in:
+		gate_note.text = "Signed in as %s." % cloud.display_name
+
+
+func _on_board(rows: Array) -> void:
+	rank_rows = rows
+	if view == "rank":
+		_show_view()
+
+
+func _on_market(rows: Array) -> void:
+	market_rows = rows
+	if view == "market":
+		_show_view()
+
+
+func _on_claim(person_id: String, ok: bool, reason: String) -> void:
+	if pending_hire_id == "" or person_id != pending_hire_id:
+		return
+	var who := pending_hire_id
+	var pay := pending_hire_pay
+	pending_hire_id = ""
+	if not ok:
+		status = reason
+		_show_view()
+		return
+	_note(func() -> String: return state.recruit_offer(who, pay))
+
+
+func _on_sale(ok: bool, reason: String, info: Dictionary) -> void:
+	if not ok:
+		status = reason if reason != "" else "The market did not move."
+		_show_view()
+		return
+	var kind := str(info.get("kind", ""))
+	if kind == "buy":
+		var price := int(info.get("price", 0))
+		var person_id := str(info.get("person", ""))
+		if state.hired_people().size() >= GameState.SEAT_COUNT:
+			status = "Every chair is full, so the transfer waits."
+			_show_view()
+			return
+		if state.people.has(person_id) and not state.person(person_id).hired:
+			if not state.visible_applicants.has(person_id):
+				state.visible_applicants.append(person_id)
+			state.hidden_applicants.erase(person_id)
+			state.cash -= price
+			var hired: String = state.recruit_offer(person_id, state.person(person_id).ask)
+			status = "Paid %d. %s" % [price, hired]
+		else:
+			status = "%s is already here." % str(info.get("name", "They"))
+	elif info.has("person") and not info.has("kind"):
+		var sale_key := str(info.get("id", ""))
+		if paid_sales.has(sale_key):
+			return
+		paid_sales[sale_key] = true
+		var sold_id := str(info.get("person", ""))
+		var sold_name := state.release_to_market(sold_id)
+		var gained := int(info.get("price", 0))
+		if sold_name != "":
+			state.cash += gained
+			status = "%s joined another company. You received %d." % [sold_name, gained]
+	else:
+		status = reason if reason != "" else "The listing is on the market."
+	cloud.load_market()
+	_show_view()
+
+
+func _show_rank() -> void:
+	_card(GOLD, ["Company", "Profit", "Capital", "Workers"])
+	if rank_rows.is_empty():
+		_card(SEA, ["Ranking", "No companies posted yet.", "End a week while signed in.", ""])
+		return
+	rank_rows.sort_custom(func(a, b) -> bool:
+		return int(a.get("profit", 0)) > int(b.get("profit", 0))
+	)
+	for row in rank_rows:
+		var best := str(row.get("best_worker", ""))
+		if best == "":
+			best = "none yet"
+		_card(SAGE, [
+			str(row.get("name", "Company")),
+			"Profit %d" % int(row.get("profit", 0)),
+			"Capital %d" % int(row.get("capital", 0)),
+			"Workers %d    Best %s, %d made" % [int(row.get("workers", 0)), best, int(row.get("best_output", 0))],
+		])
+
+
+func _show_market() -> void:
+	if not cloud.signed_in:
+		_card(PLUM, ["Market", "Sign in with Google to sell or take a person.", "Guests keep their own staff.", ""])
+		return
+	_card(PLUM, ["For sale", "Ability", "Price", "Agree"])
+	if market_rows.is_empty():
+		_card(SEA, ["Market", "Nobody is listed.", "Open a person and list them.", ""])
+	for row in market_rows:
+		_card(PLUM, [
+			str(row.get("name", "")),
+			str(row.get("ability", "")),
+			"Price %d" % int(row.get("price", 0)),
+			"Love travels with them",
+		], str(row.get("person", "")))
+		_bind_agree(str(row.get("id", "")), int(row.get("price", 0)))
+
+
+func _bind_agree(listing_id: String, price: int) -> void:
+	_add_button("Agree and pay %d" % price, func() -> void:
+		if state.hired_people().size() >= GameState.SEAT_COUNT:
+			status = "Every chair is full."
+			_show_view()
+			return
+		if state.cash < price:
+			status = "Cash is short for this transfer."
+			_show_view()
+			return
+		cloud.buy(listing_id)
+	)
+
+
 func _bind_hire_offer(who: String, spin: SpinBox) -> void:
 	_add_button("Offer this salary", func() -> void:
-		_note(func() -> String: return state.recruit_offer(who, int(spin.value)))
+		pending_hire_id = who
+		pending_hire_pay = int(spin.value)
+		var person := state.person(who)
+		cloud.claim(who, person.display_name, person.gift_line())
 	)

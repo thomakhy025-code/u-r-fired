@@ -146,8 +146,10 @@ func _check_deals_and_reports() -> void:
 	_ok(not _mail_blob(game).contains("Proposal."), "a deal with nobody on it waits")
 	game = _fresh()
 	game.recruit_offer("mina", 480)
+	game.stock = 500
 	var deal := _deal_for(game, "auntie")
 	_ok(not deal.is_empty(), "Auntie Shop's order is on the sign")
+	game.accept_order(str(deal["id"]))
 	game.assign("mina", str(deal["id"]), true)
 	var deal_id := str(deal["id"])
 	game.end_week()

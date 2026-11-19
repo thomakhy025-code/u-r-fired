@@ -82,6 +82,9 @@ var week_supplier := 0
 var week_training := 0
 var week_interest := 0
 var credit_buffer := 0
+var company_name := "Company"
+var stock := 0
+var lifetime_profit := 0
 var suppress_habits := false
 var forced_habits := {}
 var rolled_habits := {}
@@ -112,6 +115,8 @@ class Person:
 	var subsidy_weeks := 0
 	var goods := ""
 	var recipe := ""
+	var returns := true
+	var made := 0
 
 	func has_strength(gift: String) -> bool:
 		return strengths.has(gift)
@@ -159,7 +164,6 @@ func setup_new_game() -> void:
 	cooperate_from = "steady"
 	_recompute_rate(false)
 	policy_blurb = "Week 1. The office is open. These are the rules in force."
-	_open_order(person("auntie"))
 	_push_mail("Government note", _rules_note("The published rules are now in force for this company."), "government")
 	_push_mail("Application", "Mina applied. She is waiting on the recruit sign.\n" + _applicant_card(person("mina")), "application")
 	_push_mail("Supplier", "Steady Supply asks to cooperate. Their price is 32 a unit. Answer them on the supplier sign.", "cooperate")
@@ -212,10 +216,7 @@ func active_people() -> Array:
 
 
 func hearts(n: int) -> String:
-	var text := ""
-	for i in 5:
-		text += ("♥" if i < n else "♡")
-	return text
+	return "%d/5" % clampi(n, 0, 5)
 
 
 func rate_text() -> String:
@@ -516,6 +517,19 @@ func assign(employee_id: String, deal_id: String, on: bool) -> String:
 	return "%s will follow this deal." % p.display_name
 
 
+func release_to_market(id: String) -> String:
+	var p: Person = person(id)
+	if not p.hired:
+		return ""
+	var name := p.display_name
+	p.hired = false
+	p.training = false
+	p.seat = -1
+	_pull_from_deals(p, false)
+	visible_applicants.erase(id)
+	return name
+
+
 func fire(id: String) -> String:
 	if lost:
 		return loss_reason
@@ -729,6 +743,8 @@ func _close_offer(p: Person, offer: int, kind: String, love: int) -> String:
 		p.seat = _free_seat()
 		visible_applicants.erase(p.id)
 		ever_hired = true
+		if hired_people().size() == 1:
+			_open_order(person("auntie"))
 		var extra := ""
 		if subsidy_open and not subsidy_used:
 			subsidy_used = true
@@ -745,21 +761,77 @@ func _close_offer(p: Person, offer: int, kind: String, love: int) -> String:
 	return "%s accepted %d a unit with love %d. Assign someone to follow the deal." % [p.display_name, offer, p.love]
 
 
-func _make_deal(kind: String, partner_id: String, units: int, unit_price: int, heavy: bool) -> void:
+func accept_order(deal_id: String) -> String:
+	var deal := _deal_by_id(deal_id)
+	if deal.is_empty() or str(deal["stage"]) != "offer":
+		return "That order is not waiting for an answer."
+	if hired_people().is_empty():
+		return "Hire someone before you accept an order."
+	deal["stage"] = "proposal"
+	deal["reserved"] = false
+	var buyer: Person = person(str(deal["partner_id"]))
+	return "Accepted %s. Assign someone, and find a supplier if the parts are not here. If this goes well, they may return at a higher price." % buyer.goods
+
+
+func reject_order(deal_id: String) -> String:
+	var deal := _deal_by_id(deal_id)
+	if deal.is_empty() or str(deal["stage"]) != "offer":
+		return "That order is not waiting for an answer."
+	deal["stage"] = "closed"
+	var buyer: Person = person(str(deal["partner_id"]))
+	buyer.returns = false
+	shift_love(buyer, -1, "the order was refused")
+	_push_mail("Order", "%s was turned away. They may not come back." % buyer.display_name, "order")
+	return "%s may not come back." % buyer.display_name
+
+
+func answer_quality(deal_id: String, refund: bool) -> String:
+	var deal := _deal_by_id(deal_id)
+	if deal.is_empty() or str(deal["stage"]) != "quality":
+		return "Nobody is waiting on a quality answer."
+	var buyer: Person = person(str(deal["partner_id"]))
+	var pay := int(deal.get("pay", 0))
+	deal["stage"] = "closed"
+	if refund:
+		shift_love(buyer, -1, "the goods were refunded")
+		_push_mail("Quality", "%s got their money back. You were not paid." % buyer.display_name, "order")
+		return "Refunded %s. No payment came in." % buyer.display_name
+	var discounted := int(round(float(pay) * 0.6))
+	cash += discounted
+	week_revenue += discounted
+	lifetime_profit += discounted
+	buyer.ask += 4
+	_push_mail("Quality", "%s took a discount and paid %d." % [buyer.display_name, discounted], "order")
+	return "%s paid %d after the discount." % [buyer.display_name, discounted]
+
+
+func _deal_by_id(deal_id: String) -> Dictionary:
+	for deal in deals:
+		if str(deal["id"]) == deal_id:
+			return deal
+	return {}
+
+
+func _make_deal(kind: String, partner_id: String, units: int, unit_price: int, heavy: bool, stage: String = "proposal") -> void:
 	deals.append({
 		"id": "d%d" % next_deal,
 		"kind": kind,
 		"partner_id": partner_id,
 		"crew": [],
-		"stage": "proposal",
+		"stage": stage,
 		"units": units,
 		"unit_price": unit_price,
 		"heavy": heavy,
+		"pay": 0,
 	})
 	next_deal += 1
 
 
 func _open_order(customer: Person) -> void:
+	if not ever_hired:
+		return
+	if not customer.returns:
+		return
 	if not customer.active or customer.love <= 0:
 		return
 	if _open_deal_for(customer.id):
@@ -771,8 +843,8 @@ func _open_order(customer: Person) -> void:
 		units = 8 + customer.love * 2
 	if customer.has_strength("steady_orders"):
 		units = 22 + customer.love * 4
-	_make_deal("customer", customer.id, units, customer.ask, units >= 40)
-	_push_mail("Order", "%s wants %d %s at %d each. %s Assign someone before the packing can move." % [customer.display_name, units, customer.goods, customer.ask, customer.recipe], "order")
+	_make_deal("customer", customer.id, units, customer.ask, units >= 40, "offer")
+	_push_mail("Order", "%s wants %d %s at %d each. %s Accept it, or reject it. If you accept, find a supplier while the order is open. You pay the supplier when the parts arrive, and you are paid when the customer takes the goods." % [customer.display_name, units, customer.goods, customer.ask, customer.recipe], "order")
 
 
 func _free_seat() -> int:
@@ -825,13 +897,6 @@ func _partner_abandoned(deal: Dictionary) -> void:
 	var partner: Person = person(str(deal["partner_id"]))
 	if partner.active:
 		shift_love(partner, -1, "nobody followed the work")
-
-
-func _deal_by_id(id: String) -> Dictionary:
-	for deal in deals:
-		if str(deal["id"]) == id:
-			return deal
-	return {}
 
 
 func _open_deal_for(partner_id: String) -> bool:
@@ -972,7 +1037,8 @@ func _mail_has_title(title: String) -> bool:
 
 
 func _resolve_stage(deal: Dictionary) -> void:
-	if str(deal["stage"]) == "closed":
+	var stage_now := str(deal["stage"])
+	if stage_now == "closed" or stage_now == "offer" or stage_now == "quality":
 		return
 	var crew := _live_crew(deal)
 	if crew.is_empty():
@@ -981,6 +1047,15 @@ func _resolve_stage(deal: Dictionary) -> void:
 	if not partner.active:
 		deal["stage"] = "closed"
 		return
+	if str(deal["kind"]) == "customer" and not bool(deal.get("reserved", false)):
+		var need := int(deal["units"])
+		if stock < need:
+			var waiting := "Parts for %s" % partner.display_name
+			if not _mail_has_title(waiting):
+				_push_mail(waiting, "%s is accepted. The office has %d parts and this order needs %d. Packing waits until a supplier sends them. You pay the supplier when the parts arrive." % [partner.display_name, stock, need], "order")
+			return
+		stock -= need
+		deal["reserved"] = true
 	var stage := str(deal["stage"])
 	var demand := int(deal["units"])
 	var total := 0
@@ -999,6 +1074,7 @@ func _resolve_stage(deal: Dictionary) -> void:
 			solver = true
 		if member.has_strength("catch_junk"):
 			inspector_scale = maxf(inspector_scale, heart_scale(member.love))
+		member.made += fin
 		lines.append("%s reached %d by %s." % [member.display_name, fin, pace_day(member)])
 	total = mini(total, demand)
 	var share := float(total) / float(maxi(demand, 1))
@@ -1071,7 +1147,10 @@ func _resolve_stage(deal: Dictionary) -> void:
 		var bill_line := _settle_money(deal, partner, total, on_time, incident, settled)
 		if bill_line != "":
 			love_lines.append(bill_line)
-		deal["stage"] = "closed"
+		if str(deal.get("hold", "")) == "quality":
+			deal["stage"] = "quality"
+		else:
+			deal["stage"] = "closed"
 	elif stage == "proposal":
 		deal["stage"] = "doing"
 	else:
@@ -1160,14 +1239,24 @@ func _stage_work_line(stage_name: String, crew: Array, total: int, demand: int, 
 func _settle_money(deal: Dictionary, partner: Person, total: int, on_time: bool, incident: Dictionary, settled: bool) -> String:
 	if str(deal["kind"]) == "customer":
 		var units := total
-		if not incident.is_empty() and bool(incident["refund"]) and not settled:
+		var complain := held_junk
+		if not incident.is_empty() and (bool(incident["refund"]) or bool(incident["junk"])) and not settled:
+			complain = true
 			units = int(float(units) * 0.5)
 		if not on_time:
 			units = int(float(units) * 0.85)
 		var revenue := int(round(float(units * int(deal["unit_price"])) * (0.75 + 0.08 * float(partner.love))))
+		if complain:
+			deal["hold"] = "quality"
+			deal["pay"] = revenue
+			return "%s dislikes the quality. Choose a refund or a discount before any cash comes in." % partner.display_name
 		cash += revenue
 		week_revenue += revenue
-		return ""
+		lifetime_profit += revenue
+		partner.ask += 6
+		return "%s accepted the goods and paid %d. They may return at a higher price." % [partner.display_name, revenue]
+	var arrived := maxi(total, 0)
+	stock += arrived
 	var cost := int(deal["units"]) * int(deal["unit_price"])
 	if cash >= cost:
 		cash -= cost
@@ -1290,7 +1379,19 @@ func _credit_tick() -> void:
 
 
 func _ledger() -> void:
-	_push_mail("Ledger", "Orders paid: %d\nSuppliers: %d\nWages: %d\nTraining: %d\nInterest: %d\nUnpaid penalties: %d\nDebt: %d\nCash now: %d" % [week_revenue, week_supplier, week_wages, week_training, week_interest, penalty_unpaid, debt, cash], "ledger")
+	var profit := week_revenue - week_wages - week_supplier - week_training - week_interest
+	lifetime_profit += profit - week_revenue
+	_push_mail("Ledger", "Orders paid: %d\nSuppliers: %d\nWages: %d\nTraining: %d\nInterest: %d\nUnpaid penalties: %d\nDebt: %d\nParts: %d\nCash now: %d" % [week_revenue, week_supplier, week_wages, week_training, week_interest, penalty_unpaid, debt, stock, cash], "ledger")
+
+
+func best_worker_name() -> String:
+	var best: Person = null
+	for p in hired_people():
+		if best == null or p.made > best.made:
+			best = p
+	if best == null or best.made <= 0:
+		return ""
+	return best.display_name
 
 
 func _check_endings() -> void:
